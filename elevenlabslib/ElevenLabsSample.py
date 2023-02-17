@@ -1,6 +1,6 @@
 from __future__ import annotations
-from elevenlabspy.ElevenLabsVoice import ElevenLabsVoice
-from elevenlabspy.helpers import *
+from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+from elevenlabslib.helpers import *
 
 class ElevenLabsSample:
     def __init__(self, sampleData, parentVoice:ElevenLabsVoice):

@@ -1,6 +1,6 @@
 from __future__ import annotations
-from elevenlabspy.ElevenLabsUser import ElevenLabsUser
-from elevenlabspy.helpers import *
+from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+from elevenlabslib.helpers import *
 
 
 class ElevenLabsHistoryItem:

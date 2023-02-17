@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0",
+        "requests",
+        "typing"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elevenlabslib"
+version = "0.1.1"
+authors = [
+  { name="lugia19", email="lugia19@lugia19.com" },
+]
+description = "Full implementation of the elevenlabs API in python"
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/lugia19/elevenlabslib"
+"Bug Tracker" = "https://github.com/lugia19/elevenlabslib"

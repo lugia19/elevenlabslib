@@ -5,10 +5,10 @@ from typing import BinaryIO, Optional
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from elevenlabspy.ElevenLabsSample import ElevenLabsSample
+    from elevenlabslib.ElevenLabsSample import ElevenLabsSample
 
-from elevenlabspy.ElevenLabsUser import ElevenLabsUser
-from elevenlabspy.helpers import *
+from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+from elevenlabslib.helpers import *
 
 class ElevenLabsVoice:
     def __init__(self, voiceData, linkedUser:ElevenLabsUser):
@@ -47,7 +47,7 @@ class ElevenLabsVoice:
         response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
         outputList = list()
         samplesData = response.json()["samples"]
-        from elevenlabspy.ElevenLabsSample import ElevenLabsSample
+        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
         for sampleData in samplesData:
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList

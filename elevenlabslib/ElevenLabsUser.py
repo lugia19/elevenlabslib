@@ -5,9 +5,9 @@ import zipfile
 from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
-    from elevenlabspy.ElevenLabsHistoryItem import ElevenLabsHistoryItem
-    from elevenlabspy.ElevenLabsVoice import ElevenLabsVoice
-from elevenlabspy.helpers import *
+    from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+    from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+from elevenlabslib.helpers import *
 
 
 class ElevenLabsUser:
@@ -56,7 +56,7 @@ class ElevenLabsUser:
         availableVoices:list[ElevenLabsVoice] = list()
         if response.ok:
             voicesData = response.json()
-            from elevenlabspy.ElevenLabsVoice import ElevenLabsVoice
+            from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
             for voiceData in voicesData["voices"]:
                 availableVoices.append(ElevenLabsVoice(voiceData, self))
         else:
@@ -66,7 +66,7 @@ class ElevenLabsUser:
     def get_voice_by_ID(self, voiceID:str) -> ElevenLabsVoice:
         response = api_get( "/voices/"+voiceID, headers=self._headers)
         voiceData = response.json()
-        from elevenlabspy.ElevenLabsVoice import ElevenLabsVoice
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice(voiceData, self)
 
     def get_voices_by_name(self, voiceName:str) -> list[ElevenLabsVoice]:
@@ -81,7 +81,7 @@ class ElevenLabsUser:
         outputList = list()
         response = api_get("/history", headers=self._headers)
         historyData = response.json()
-        from elevenlabspy.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
         for value in historyData["history"]:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
