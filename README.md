@@ -15,9 +15,12 @@ import pydub
 
 user = ElevenLabsUser("[API_KEY]")
 voice = user.get_voices_by_name("Rachel")[0]  #This is a list because multiple voices can have the same name
+
 play(voice.get_preview_bytes())
+
 for sample in voice.get_samples():
     play(sample.get_audio_bytes())
+    
 voice.generate_audio_bytes("Test.")
 
 
