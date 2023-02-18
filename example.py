@@ -153,6 +153,8 @@ def play(bytesData):
     pydub.playback.play(sound)
     return
 
+#This function uses pydub (and io) to convert the bytes of an mp3 file to the bytes of a wav file.
+#I use it so I can play back the audio using pyaudio instead of pydub (which allows you to choose the output device).
 def convert_to_wav_bytes(mp3Bytes:bytes) -> bytes:
     wavBytes = io.BytesIO()
     sound = AudioSegment.from_file_using_temporary_files(io.BytesIO(mp3Bytes), format="mp3")

@@ -43,7 +43,6 @@ def api_json(path, headers, jsonData) -> requests.Response:
 def api_multipart(path, headers, data=None, filesData=None):
     return _api_call("multipart", path, headers, data, filesData)
 
-#TODO: REMOVE THIS
 def pretty_print_POST(req):
     logging.error('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
         '-----------START-----------',
