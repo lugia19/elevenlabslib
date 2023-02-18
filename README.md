@@ -30,4 +30,4 @@ def play(bytesData):
     return
 ```
 
-For a far more comprehensive list of examples, check `example.py`
+For a far more comprehensive list of examples, check `example.py` on the github repo.

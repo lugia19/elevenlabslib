@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 from typing import BinaryIO, Optional
 
@@ -18,7 +19,6 @@ class ElevenLabsVoice:
         self.initialName = voiceData["name"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
-        self._previewURL = voiceData["preview_url"]
 
     #The reasoning behind only providing this method is that I don't want to do too much with the library.
     #It's only a way to call the API more easily. Saving files, conversion etc is up to the implementation.
@@ -52,8 +52,12 @@ class ElevenLabsVoice:
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
 
-    def get_voice_preview_bytes(self) -> bytes:
-        response = requests.get(self._previewURL, allow_redirects=True)
+    #This will error out if the preview hasn't been generated
+    def get_preview_bytes(self) -> bytes:
+        previewURL = self.get_preview_url()
+        if previewURL is None:
+            raise Exception("No preview URL available!")
+        response = requests.get(previewURL, allow_redirects=True)
         return response.content
 
 
@@ -64,8 +68,11 @@ class ElevenLabsVoice:
 
     def get_name(self) -> str:
         response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
-
         return response.json()["name"]
+
+    def get_preview_url(self) -> str|None:
+        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        return response.json()["preview_url"]
 
     def edit_settings(self, stability:float=None, similarity_boost:float=None):
         if stability is None or similarity_boost is None:
@@ -89,18 +96,18 @@ class ElevenLabsVoice:
                 fileName = samplePath[samplePath.rindex("\\")+1:]
             else:
                 fileName = samplePath
-            sampleBytes[fileName] = open(samplePath, "rb")
+            sampleBytes[fileName] = open(samplePath, "rb").read()
         self.add_samples_bytes(sampleBytes)
 
     #Requires a dict of filenames and bytes
-    def add_samples_bytes(self, samples:dict[str, BinaryIO]):
+    def add_samples_bytes(self, samples:dict[str, bytes]):
         if len(samples.keys()) == 0:
             raise Exception("Please add at least one sample!")
 
         payload = {"name":self.get_name()}
         files = list()
         for fileName, fileBytes in samples.items():
-            files.append(("files", (fileName, fileBytes)))
+            files.append(("files", (fileName, io.BytesIO(fileBytes))))
 
         api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
 
@@ -109,10 +116,6 @@ class ElevenLabsVoice:
             raise Exception("Cannot delete premade voices!")
         response = api_del("/voices/"+self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
-
-    @property
-    def previewURL(self):
-        return self._previewURL
 
     @property
     def category(self):

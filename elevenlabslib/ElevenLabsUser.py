@@ -135,10 +135,10 @@ class ElevenLabsUser:
                 fileName = samplePath[samplePath.rindex("\\") + 1:]
             else:
                 fileName = samplePath
-            sampleBytes[fileName] = open(samplePath, "rb")
+            sampleBytes[fileName] = open(samplePath, "rb").read()
         return self.create_voice_bytes(name, sampleBytes)
 
-    def create_voice_bytes(self, name:str, samples: dict[str, BinaryIO]) -> ElevenLabsVoice:
+    def create_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ElevenLabsVoice:
         if len(samples.keys()) == 0:
             raise Exception("Please add at least one sample!")
         if len(samples.keys()) > 25:
@@ -147,6 +147,6 @@ class ElevenLabsUser:
         payload = {"name": name}
         files = list()
         for fileName, fileBytes in samples.items():
-            files.append(("files", (fileName, fileBytes)))
+            files.append(("files", (fileName, io.BytesIO(fileBytes))))
         response = api_multipart("/voices/add", self._headers, data=payload, filesData=files)
         return self.get_voice_by_ID(response.json()["voice_id"])
