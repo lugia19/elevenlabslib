@@ -10,7 +10,7 @@ version = "0.1.9"
 authors = [
   { name="lugia19", email="lugia19@lugia19.com" },
 ]
-description = "Full implementation of the elevenlabs API in python"
+description = "Complete python wrapper for the elevenlabs API"
 readme = "README.md"
 requires-python = ">=3.7"
 classifiers = [
