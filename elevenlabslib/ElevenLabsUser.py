@@ -18,11 +18,8 @@ class ElevenLabsUser:
 
     def _get_subscription_data(self) -> dict:
         response = api_get("/user/subscription",self._headers)
-        if response.ok:
-            subscriptionData = response.json()
-            return subscriptionData
-        else:
-            raise Exception(str(response.status_code))
+        subscriptionData = response.json()
+        return subscriptionData
 
     @property
     def headers(self):
@@ -54,13 +51,10 @@ class ElevenLabsUser:
     def get_available_voices(self) -> list[ElevenLabsVoice]:
         response = api_get("/voices", headers=self._headers)
         availableVoices:list[ElevenLabsVoice] = list()
-        if response.ok:
-            voicesData = response.json()
-            from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
-            for voiceData in voicesData["voices"]:
-                availableVoices.append(ElevenLabsVoice(voiceData, self))
-        else:
-            raise Exception(str(response.status_code))
+        voicesData = response.json()
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        for voiceData in voicesData["voices"]:
+            availableVoices.append(ElevenLabsVoice(voiceData, self))
         return availableVoices
 
     def get_voice_by_ID(self, voiceID:str) -> ElevenLabsVoice:
