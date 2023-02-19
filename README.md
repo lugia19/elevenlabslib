@@ -1,5 +1,5 @@
 # elevenlabslib
-Full python implementation of the elevenlabs API.
+Python wrapper for the full elevenlabs API.
 
 # Installation
 
