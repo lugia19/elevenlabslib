@@ -4,13 +4,14 @@ import os
 import pydub.playback
 from pydub import AudioSegment
 
+import elevenlabslib.helpers
 from elevenlabslib import *
 
 def main():
     if os.path.exists("config.json"):
         configData = json.load(open("config.json","r"))
-        apiKey = configData["api_key"]
-        apiKey2 = configData["api_key_2"]
+        apiKey = configData["api_key_2"]
+        apiKey2 = configData["api_key"]
         samplePath1 = configData["sample_path_1"]
         samplePath2 = configData["sample_path_2"]
     else:
@@ -41,87 +42,94 @@ def main():
     # Get the filename of the first sample from the path to identify it:
     firstSampleFileName = samplePath1[samplePath1.rfind("\\") + 1:]
 
-    #Create the new voice by uploading the sample as bytes
-    newVoice = user.create_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
-    #This can also be done by using the path:
-    #newVoice = user.create_voice_by_path("TESTNAME", samplePath1)
+    if user.get_voice_clone_available():
+        #Create the new voice by uploading the sample as bytes
+        newVoice = user.create_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
+        #This can also be done by using the path:
+        #newVoice = user.create_voice_by_path("TESTNAME", samplePath1)
 
-    #Get new voice data
-    print("New voice:")
-    print(newVoice.get_name())
-    print(newVoice.voiceID)
-    print(newVoice.get_samples()[0].fileName)
+        #Get new voice data
+        print("New voice:")
+        print(newVoice.get_name())
+        print(newVoice.voiceID)
+        print(newVoice.get_samples()[0].fileName)
 
-    #Play back the automatically generated preview:
-    try:
-        play(newVoice.get_preview_bytes())
-    except:
-        print("Error getting the preview. It likely hasn't been generated yet.")
+        #Play back the automatically generated preview:
+        try:
+            play(newVoice.get_preview_bytes())
+        except:
+            print("Error getting the preview. It likely hasn't been generated yet.")
 
-    #Get a list of all cloned voices available to the account:
-    print("New cloned voices:")
-    for voice in user.get_available_voices():
-        if voice.category == "cloned":
-            #The .initialName property is the name the voice had at the time the object was created.
-            #It's useful when iterating over all available voices like this, since it won't make a call to the API every time.
-            print(voice.initialName)
+        #Get a list of all cloned voices available to the account:
+        print("New cloned voices:")
+        for voice in user.get_available_voices():
+            if voice.category == "cloned":
+                #The .initialName property is the name the voice had at the time the object was created.
+                #It's useful when iterating over all available voices like this, since it won't make a call to the API every time.
+                print(voice.initialName)
 
-    #Add a new sample to the voice:
-    newVoice.add_samples_by_path([samplePath2])
+        #Add a new sample to the voice:
+        newVoice.add_samples_by_path([samplePath2])
 
 
 
-    #Remove the first sample, playing it back before deleting it:
-    for sample in newVoice.get_samples():
-        #NOTE: You CANNOT find a sample by simply checking if the bytes match. There is some re-encoding (or tag stripping) going on server-side.
-        if sample.fileName == firstSampleFileName:
-            print("Found the sample we want to delete.")
-            print(sample.fileName)
-            play(sample.get_audio_bytes())
-            sample.delete()
+        #Remove the first sample, playing it back before deleting it:
+        for sample in newVoice.get_samples():
+            #NOTE: You CANNOT find a sample by simply checking if the bytes match. There is some re-encoding (or tag stripping) going on server-side.
+            if sample.fileName == firstSampleFileName:
+                print("Found the sample we want to delete.")
+                print(sample.fileName)
+                play(sample.get_audio_bytes())
+                sample.delete()
 
-    #Change the voice name:
-    newVoice.edit_name("newName")
+        #Change the voice name:
+        newVoice.edit_name("newName")
 
-    #Showcase how despite the name being changed, the initialName DOES NOT.
-    print("newVoice.get_name(): " + newVoice.get_name())
-    print("newVoice.initialName: " + newVoice.initialName)
+        #Showcase how despite the name being changed, the initialName DOES NOT.
+        print("newVoice.get_name(): " + newVoice.get_name())
+        print("newVoice.initialName: " + newVoice.initialName)
 
-    #Get the current voice settings:
-    currentSettings = newVoice.get_settings()
-    stability:float = currentSettings["stability"]
-    similarityBoost:float = currentSettings["similarity_boost"]
+        #Get the current voice settings:
+        currentSettings = newVoice.get_settings()
+        stability:float = currentSettings["stability"]
+        similarityBoost:float = currentSettings["similarity_boost"]
 
-    #Lower stability and increase similarity, then edit the voice settings:
-    stability = min(1.0, stability-0.1)
-    similarityBoost = min(1.0, similarityBoost + 0.1)
-    newVoice.edit_settings(stability, similarityBoost)
-    try:
-        # Generate an output:
-        newVoice.generate_audio_bytes("Test.")
-        # Generate an output overwriting the stability and/or similarity setting for this generation:
-        newVoice.generate_audio_bytes("Test.", stability=0.3)
-    except:
-        print("Couldn't generate output, likely out of tokens.")
+        #Lower stability and increase similarity, then edit the voice settings:
+        stability = min(1.0, stability-0.1)
+        similarityBoost = min(1.0, similarityBoost + 0.1)
+        newVoice.edit_settings(stability, similarityBoost)
+        try:
+            # Generate an output:
+            newVoice.generate_audio_bytes("Test.")
+            # Generate an output overwriting the stability and/or similarity setting for this generation:
+            newVoice.generate_audio_bytes("Test.", stability=0.3)
+        except:
+            print("Couldn't generate output, likely out of tokens.")
 
-    #Save the voice's current name:
-    newVoiceName = newVoice.get_name()
+        #Save the voice's current name:
+        newVoiceName = newVoice.get_name()
 
-    #Delete the new voice:
-    newVoice.delete_voice()
+        #Delete the new voice:
+        newVoice.delete_voice()
 
-    #Warning: The object still persists but its voiceID is now empty, so none of the methods will work.
+        #Warning: The object still persists but its voiceID is now empty, so none of the methods will work.
 
-    #Check that the voice was deleted:
-    for voice in user.get_available_voices():
-        voiceName = voice.initialName
-        print(voiceName)
-        assert(voiceName != newVoiceName)
+        #Check that the voice was deleted:
+        for voice in user.get_available_voices():
+            voiceName = voice.initialName
+            print(voiceName)
+            assert(voiceName != newVoiceName)
 
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
     premadeVoice = user.get_voices_by_name("Rachel")[0]
 
+    #Playback in blocking mode.
+    premadeVoice.generate_and_play_audio("Test.", False)
+
+    #Playback with streaming (faster response time for longer files)
+    premadeVoice.generate_and_stream_audio("Test.", 6)
+    print("FUCK")
     #Generate a test sample
     try:
         play(premadeVoice.generate_audio_bytes("Test."))

@@ -20,6 +20,10 @@ class ElevenLabsHistoryItem:
         response = api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
         return response.content
 
+    def play_audio_bytes(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID)
+        return
+
     def delete(self):
         response = api_del("/history/" + self.historyID, self._parentUser.headers)
         self._historyID = ""

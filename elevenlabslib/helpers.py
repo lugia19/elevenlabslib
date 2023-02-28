@@ -1,5 +1,9 @@
+import io
 import logging
+from typing import Optional
 
+import sounddevice as sd
+import soundfile as sf
 import requests
 
 api_endpoint = "https://api.elevenlabs.io/v1"
@@ -50,3 +54,10 @@ def pretty_print_POST(req):
         '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
         req.body,
     ))
+
+def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None) -> None:
+    if portaudioDeviceID is None:
+        portaudioDeviceID = sd.default.device
+    audioFile = io.BytesIO(audioData)
+    soundFile = sf.SoundFile(audioFile)
+    sd.play(soundFile.read(), samplerate=soundFile.samplerate, blocking=not playInBackground, device=portaudioDeviceID)
