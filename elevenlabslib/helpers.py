@@ -25,15 +25,14 @@ def _api_call(requestType, path, headers, jsonData=None, filesData=None) -> requ
         else:
             response = requests.post(api_endpoint + path, headers=headers, data=jsonData)
     else:
-        raise Exception("Unknown API call type!")
+        raise ValueError("Unknown API call type!")
 
-    if response.ok:
+    try:
+        response.raise_for_status()
         return response
-    else:
+    except requests.exceptions.RequestException as e:
         pretty_print_POST(response.request)
-        responseJSON = response.json()
-        raise Exception("Response error!"+
-                        "\nDetail: " + str(responseJSON["detail"]))
+        raise e
 
 def api_get(path, headers) -> requests.Response:
     return _api_call("get",path, headers)

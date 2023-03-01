@@ -4,7 +4,17 @@ from elevenlabslib.helpers import *
 
 
 class ElevenLabsHistoryItem:
-    def __init__(self, data, parentUser):
+    """
+    Represents a previously generated audio.
+    """
+    def __init__(self, data:dict, parentUser:ElevenLabsUser):
+        """
+        Initializes a new instance of the ElevenLabsHistoryItem class.
+
+        Args:
+        	data: a dictionary containing information about the history item
+        	parentUser: an instance of ElevenLabsUser class representing the user that generated it
+        """
         self._parentUser:ElevenLabsUser = parentUser
         self._historyID = data["history_item_id"]
         self._voiceId = data["voice_id"]
@@ -17,14 +27,32 @@ class ElevenLabsHistoryItem:
         self._state = data["state"]
 
     def get_audio_bytes(self):
+        """
+        Retrieves the audio bytes associated with the history item.
+        IMPORTANT: If you're looking to download multiple history items, use the user function instead.
+        That will download a zip containing all the history items (by calling a different endpoint).
+
+        Returns:
+            bytes: a bytes object containing the audio in mp3 format.
+        """
         response = api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
         return response.content
 
-    def play_audio_bytes(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+        """
+        Plays the audio associated with the history item.
+
+        Args:
+            playInBackground: a boolean indicating whether the audio should be played in the background
+            portaudioDeviceID: an optional integer representing the portaudio device ID to use
+        """
         play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID)
         return
 
     def delete(self):
+        """
+        Deletes the history item.
+        """
         response = api_del("/history/" + self.historyID, self._parentUser.headers)
         self._historyID = ""
 

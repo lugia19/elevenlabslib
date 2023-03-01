@@ -125,10 +125,10 @@ def main():
     premadeVoice = user.get_voices_by_name("Rachel")[0]
 
     #Playback in blocking mode.
-    premadeVoice.generate_and_play_audio("Test.", False)
+    premadeVoice.generate_and_play_audio("This is a test to see how much faster the playback is when using the streaming method.", playInBackground=False, portaudioDeviceID=6)
 
     #Playback with streaming (faster response time for longer files)
-    premadeVoice.generate_and_stream_audio("Test.", 6)
+    premadeVoice.generate_and_stream_audio("This is a test to see how much faster the playback is when using the streaming method.", 6)
     print("FUCK")
     #Generate a test sample
     try:

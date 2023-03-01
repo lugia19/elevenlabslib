@@ -12,14 +12,30 @@ class ElevenLabsSample:
         self._hash = sampleData["hash"]
 
     def get_audio_bytes(self):
+        """
+        Retrieves the audio bytes associated with the sample.
+
+        Returns:
+            bytes: a bytes object containing the audio in mp3 format.
+        """
         response = api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
         return response.content
 
     def play_audio_bytes(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+        """
+        Plays the audio associated with the sample.
+
+        Args:
+            playInBackground: a boolean indicating whether the audio should be played in the background
+            portaudioDeviceID: an optional integer representing the portaudio device ID to use
+        """
         play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID)
         return
 
     def delete(self):
+        """
+        Deletes the sample.
+        """
         response = api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID, self._parentVoice.linkedUser.headers)
         self._sampleID = ""
 

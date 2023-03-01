@@ -11,7 +11,16 @@ from elevenlabslib.helpers import *
 
 
 class ElevenLabsUser:
+    """
+    Represents a user of the ElevenLabs API
+    """
     def __init__(self, xi_api_key:str):
+        """
+        Initializes a new instance of the ElevenLabsUser class.
+
+        Args:
+            xi_api_key (str): The user's API key.
+        """
         self._xi_api_key = xi_api_key
         self._headers = default_headers
         self._headers["xi-api-key"] = self._xi_api_key
@@ -22,48 +31,105 @@ class ElevenLabsUser:
         return subscriptionData
 
     @property
-    def headers(self):
+    def headers(self) -> dict:
+        """
+        Returns the headers used for the API requests.
+
+        Returns:
+            dict: The headers.
+        """
         return self._headers
 
-    #These are all the functions that fetch user info from the API
     def get_current_character_count(self) -> int:
+        """
+        Gets the current number of characters used by the user.
+
+        Returns:
+            int: The number of characters used.
+        """
         subData = self._get_subscription_data()
         return subData["character_count"]
 
     def get_character_limit(self) -> int:
+        """
+        Gets the character limit for the user's subscription.
+
+        Returns:
+            int: The character limit.
+        """
         subData = self._get_subscription_data()
         return subData["character_limit"]
 
     def get_can_extend_character_limit(self) -> bool:
+        """
+        Gets whether the user can extend their character limit.
+
+        Returns:
+            bool: True if the user can extend their character limit, False otherwise.
+        """
         subData = self._get_subscription_data()
         return subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"]
 
     def get_voice_clone_available(self) -> bool:
+        """
+        Gets whether the user can use instant voice cloning.
+
+        Returns:
+            bool: True if the user can use instant voice cloning, False otherwise.
+        """
         subData = self._get_subscription_data()
         return subData["can_use_instant_voice_cloning"]
 
     def get_next_invoice(self) -> dict | None:
+        """
+        Gets the user's next invoice, if any.
+
+        Returns:
+            dict | None: The next invoice data, or None if there is no next invoice.
+        """
         subData = self._get_subscription_data()
         return subData["next_invoice"]
 
-
-
     def get_available_voices(self) -> list[ElevenLabsVoice]:
+        """
+        Gets a list of all available voices.
+
+        Returns:
+            list[ElevenLabsVoice]: A list of available voices.
+        """
         response = api_get("/voices", headers=self._headers)
-        availableVoices:list[ElevenLabsVoice] = list()
+        availableVoices: list[ElevenLabsVoice] = list()
         voicesData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
             availableVoices.append(ElevenLabsVoice(voiceData, self))
         return availableVoices
 
-    def get_voice_by_ID(self, voiceID:str) -> ElevenLabsVoice:
-        response = api_get( "/voices/"+voiceID, headers=self._headers)
+    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice:
+        """
+        Gets a specific voice by ID.
+
+        Args:
+            voiceID (str): The ID of the voice to get.
+
+        Returns:
+            ElevenLabsVoice: The requested voice.
+        """
+        response = api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice(voiceData, self)
 
-    def get_voices_by_name(self, voiceName:str) -> list[ElevenLabsVoice]:
+    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice]:
+        """
+        Gets a list of voices with the given name.
+
+        Args:
+            voiceName (str): The name of the voices to get.
+
+        Returns:
+            list[ElevenLabsVoice]: A list of matching voices.
+        """
         allVoices = self.get_available_voices()
         matchingVoices = list()
         for voice in allVoices:
@@ -72,6 +138,12 @@ class ElevenLabsUser:
         return matchingVoices
 
     def get_history_items(self) -> list[ElevenLabsHistoryItem]:
+        """
+        Gets a list of the user's history items.
+
+        Returns:
+            list[ElevenLabsHistoryItem]: A list of history items.
+        """
         outputList = list()
         response = api_get("/history", headers=self._headers)
         historyData = response.json()
@@ -80,8 +152,17 @@ class ElevenLabsUser:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
 
-    #Returns a dictionary where the key is the historyItem and the value is the bytes of the mp3 file.
     def download_multiple_history_items(self, historyItems: list[ElevenLabsHistoryItem]) -> dict[ElevenLabsHistoryItem, bytes]:
+        """
+        Download multiple history items and return a dictionary where the key is the history item
+        and the value is the bytes of the mp3 file.
+
+        Args:
+            historyItems (list[ElevenLabsHistoryItem]): List of ElevenLabsHistoryItem objects to download.
+
+        Returns:
+            dict[ElevenLabsHistoryItem, bytes]: Dictionary where the key is the history item and the value is the bytes of the mp3 file.
+        """
         historyItemsByID = dict()
         for item in historyItems:
             historyItemsByID[item.historyID] = item
@@ -103,8 +184,17 @@ class ElevenLabsUser:
                 downloadedHistoryItems[historyItem] = downloadedZip.read(fileName)
         return downloadedHistoryItems
 
-    # Returns a dictionary where the key is the historyID and the value is the bytes of the mp3 file.
     def download_multiple_history_items_by_ID(self, historyItemIDs:list[str]) -> dict[str, bytes]:
+        """
+            Download multiple history items by ID and return a dictionary where the key is the history ID
+            and the value is the bytes of the mp3 file.
+
+            Args:
+                historyItemIDs (list[str]): List of history item IDs to download.
+
+            Returns:
+                dict[str, bytes]: Dictionary where the key is the history ID and the value is the bytes of the mp3 file.
+            """
         payload = {"history_item_ids": historyItemIDs}
         response = api_json("/history/download", headers=self._headers, jsonData=payload)
 
@@ -123,6 +213,16 @@ class ElevenLabsUser:
         return downloadedHistoryItems
 
     def create_voice_by_path(self, name:str, samples: list[str]) -> ElevenLabsVoice:
+        """
+            Create a new ElevenLabsVoice object by providing the voice name and a list of sample file paths.
+
+            Args:
+                name (str): Name of the voice to be created.
+                samples (list[str]): List of file paths for the voice samples.
+
+            Returns:
+                ElevenLabsVoice: Newly created ElevenLabsVoice object.
+            """
         sampleBytes = {}
         for samplePath in samples:
             if "\\" in samplePath:
@@ -133,6 +233,16 @@ class ElevenLabsUser:
         return self.create_voice_bytes(name, sampleBytes)
 
     def create_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ElevenLabsVoice:
+        """
+            Create a new ElevenLabsVoice object by providing the voice name and a dictionary of sample file names and bytes.
+
+            Args:
+                name (str): Name of the voice to be created.
+                samples (dict[str, bytes]): Dictionary of sample file names and bytes for the voice samples.
+
+            Returns:
+                ElevenLabsVoice: Newly created ElevenLabsVoice object.
+            """
         if len(samples.keys()) == 0:
             raise Exception("Please add at least one sample!")
         if len(samples.keys()) > 25:
