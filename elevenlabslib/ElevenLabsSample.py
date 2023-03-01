@@ -21,7 +21,7 @@ class ElevenLabsSample:
         response = api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
         return response.content
 
-    def play_audio_bytes(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
         """
         Plays the audio associated with the sample.
 
