@@ -16,7 +16,7 @@ Here is a very simple usage sample.
 ```py
 from elevenlabslib import *
 
-user = ElevenLabsUser("[API_KEY]")
+user = ElevenLabsUser("API_KEY")
 voice = user.get_voices_by_name("Rachel")[0]  # This is a list because multiple voices can have the same name
 
 voice.play_preview(playInBackground=False)
