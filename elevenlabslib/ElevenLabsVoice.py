@@ -12,25 +12,42 @@ import sounddevice as sd
 import numpy
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsSample import ElevenLabsSample
-
-from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+    from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
 
 playbackBlockSize = 2048
 downloadChunkSize = 4096
 playbackBufferSizeInBlocks = 20
 
-
 class ElevenLabsVoice:
     """
-    Represents a voice in the ElevenLabs API (custom or premade)
+    Represents a voice in the ElevenLabs API.
+    It's the parent class for all voices, and used directly for the premade ones.
     """
+    @staticmethod
+    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice:
+        """
+        Initializes a new instance of either ElevenLabsVoice or ElevenLabsGeneratedVoice or ElevenLabsClonedVoice depending on the category.
+        Args:
+            voiceData: A dictionary containing the voice data.
+            linkedUser: An instance of the ElevenLabsUser class representing the linked user.
+        """
+        if voiceData["category"] == "premade":
+            return ElevenLabsVoice(voiceData, linkedUser)
+        elif voiceData["category"] == "cloned":
+            return ElevenLabsClonedVoice(voiceData, linkedUser)
+        elif voiceData["category"] == "generated":
+            return ElevenLabsGeneratedVoice(voiceData, linkedUser)
+        else:
+            raise ValueError(voiceData["category"] + " is not a valid voice category!")
+
     def __init__(self, voiceData, linkedUser:ElevenLabsUser):
         """
         Initializes a new instance of the ElevenLabsVoice class.
-
+        Don't use this constructor directly. Use the factory instead.
         Args:
             voiceData: A dictionary containing the voice data.
             linkedUser: An instance of the ElevenLabsUser class representing the linked user.
@@ -41,16 +58,20 @@ class ElevenLabsVoice:
         self.initialName = voiceData["name"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
+        self._labels = voiceData["labels"]
 
-        self.q = queue.Queue(maxsize=playbackBufferSizeInBlocks)
-        self.bytesFile = io.BytesIO()
-        self.bytesSoundFile: Optional[sf.SoundFile] = None    #Needs to be created later.
-        self.bytesLock = threading.Lock()
-        self.playbackFinishedEvent = threading.Event()
-        self.headerReadyEvent = threading.Event()
-        self.soundFileReadyEvent = threading.Event()
-        self.downloadDoneEvent = threading.Event()
-        self.blockDataAvailable = threading.Event()
+        self._q = queue.Queue(maxsize=playbackBufferSizeInBlocks)
+        self._bytesFile = io.BytesIO()
+        self._bytesSoundFile: Optional[sf.SoundFile] = None    #Needs to be created later.
+        self._bytesLock = threading.Lock()
+
+        self._events:dict[str, threading.Event] = {
+            "playbackFinishedEvent" : threading.Event(),
+            "headerReadyEvent" : threading.Event(),
+            "soundFileReadyEvent" : threading.Event(),
+            "downloadDoneEvent" : threading.Event(),
+            "blockDataAvailable" : threading.Event()
+        }
 
     def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> dict:
         """
@@ -126,6 +147,13 @@ class ElevenLabsVoice:
         Returns:
         None
         """
+        #Clean all the buffers and reset all events.
+        self._q = queue.Queue(maxsize=playbackBufferSizeInBlocks)
+        self._bytesFile = io.BytesIO()
+        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
+        for eventName, event in self._events.items():
+            event.clear()
+
         payload = self._generate_payload(prompt, stability, similarity_boost)
         path = "/text-to-speech/" + self._voiceID + "/stream"
         if portaudioDeviceID is None:
@@ -136,45 +164,45 @@ class ElevenLabsVoice:
 
         while True:
             logging.debug("Waiting for header event...")
-            self.headerReadyEvent.wait()
+            self._events["headerReadyEvent"].wait()
             logging.debug("Header maybe ready?")
             try:
-                with self.bytesLock:
-                    self.bytesSoundFile = sf.SoundFile(self.bytesFile)
-                    logging.debug("File created (" + str(self.bytesFile.tell()) + " bytes read).")
-                    self.soundFileReadyEvent.set()
+                with self._bytesLock:
+                    self._bytesSoundFile = sf.SoundFile(self._bytesFile)
+                    logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
+                    self._events["soundFileReadyEvent"].set()
                     break
             except sf.LibsndfileError:
-                self.bytesFile.seek(0)
-                dataBytes = self.bytesFile.read()
-                self.bytesFile.seek(0)
+                self._bytesFile.seek(0)
+                dataBytes = self._bytesFile.read()
+                self._bytesFile.seek(0)
                 logging.debug("Error creating the soundfile with " + str(len(dataBytes)) + " bytes of data. Let's clear the headerReady event.")
-                self.headerReadyEvent.clear()
-                self.soundFileReadyEvent.set()
+                self._events["headerReadyEvent"].clear()
+                self._events["soundFileReadyEvent"].set()
 
         stream = sd.RawOutputStream(
-            samplerate=self.bytesSoundFile.samplerate, blocksize=playbackBlockSize,
-            device=portaudioDeviceID, channels=self.bytesSoundFile.channels, dtype='float32',
-            callback=self._stream_playback_callback, finished_callback=self.playbackFinishedEvent.set)
+            samplerate=self._bytesSoundFile.samplerate, blocksize=playbackBlockSize,
+            device=portaudioDeviceID, channels=self._bytesSoundFile.channels, dtype='float32',
+            callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
         logging.debug("Starting playback...")
         with stream:
-            timeout = playbackBlockSize * playbackBufferSizeInBlocks / self.bytesSoundFile.samplerate
+            timeout = playbackBlockSize * playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
             # data = getDataFromDownload(bytesSoundFile)
             while True:
                 data = self._insert_into_queue_from_download_thread()
                 if data != b"":
                     logging.debug("Putting " + str(len(data)) + " bytes in queue.")
-                    self.q.put(data, timeout=timeout)
+                    self._q.put(data, timeout=timeout)
                 else:
                     logging.debug("Got back no data, let's not write that to the queue...")
-                    with self.bytesLock:
-                        oldPos = self.bytesFile.tell()
-                        endPos = self.bytesFile.seek(0, os.SEEK_END)
-                        self.bytesFile.seek(oldPos)
-                        if endPos == oldPos and self.downloadDoneEvent.is_set():
+                    with self._bytesLock:
+                        oldPos = self._bytesFile.tell()
+                        endPos = self._bytesFile.seek(0, os.SEEK_END)
+                        self._bytesFile.seek(oldPos)
+                        if endPos == oldPos and self._events["downloadDoneEvent"].is_set():
                             break
             logging.debug("While loop done.")
-            self.playbackFinishedEvent.wait()  # Wait until playback is finished
+            self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             logging.debug(stream.active)
         logging.debug("Stream done.")
 
@@ -182,45 +210,47 @@ class ElevenLabsVoice:
 
     def _stream_downloader_function(self, path, payload):
         # This is the function running in the download thread.
+        #testURL = ""
+        #streamedRequest = requests.get(testURL, stream=True)
         streamedRequest = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
 
         streamedRequest.raise_for_status()
         totalLength = 0
         logging.debug("Starting iter...")
         for chunk in streamedRequest.iter_content(chunk_size=downloadChunkSize):
-            if self.headerReadyEvent.is_set():
+            if self._events["headerReadyEvent"].is_set():
                 logging.debug("HeaderReady is set, waiting for the soundfile...")
-                self.soundFileReadyEvent.wait()  # Wait for the soundfile to be created.
-                if not self.headerReadyEvent.is_set():
+                self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
+                if not self._events["headerReadyEvent"].is_set():
                     logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
-                    self.soundFileReadyEvent.clear()
+                    self._events["soundFileReadyEvent"].clear()
 
             totalLength += len(chunk)
             if len(chunk) != downloadChunkSize:
                 logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
 
             # Write the new data then seek back to the initial position.
-            with self.bytesLock:
-                if not self.headerReadyEvent.is_set():
+            with self._bytesLock:
+                if not self._events["headerReadyEvent"].is_set():
                     logging.debug("headerReady not set, setting it...")
-                    self.bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
-                    self.bytesFile.write(chunk)
-                    self.bytesFile.seek(0)  # Move the head back.
-                    self.headerReadyEvent.set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
+                    self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
+                    self._bytesFile.write(chunk)
+                    self._bytesFile.seek(0)  # Move the head back.
+                    self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
                 else:
-                    lastReadPos = self.bytesFile.tell()
-                    lastWritePos = self.bytesFile.seek(0, os.SEEK_END)
-                    self.bytesFile.write(chunk)
-                    endPos = self.bytesFile.tell()
-                    self.bytesFile.seek(lastReadPos)
+                    lastReadPos = self._bytesFile.tell()
+                    lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
+                    self._bytesFile.write(chunk)
+                    endPos = self._bytesFile.tell()
+                    self._bytesFile.seek(lastReadPos)
                     logging.debug("Write head move: " + str(endPos - lastWritePos))
                     if endPos - lastReadPos > playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
                         logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
-                        self.blockDataAvailable.set()
+                        self._events["blockDataAvailable"].set()
 
         logging.debug("Download finished - " + str(totalLength) + ".")
-        self.downloadDoneEvent.set()
-        self.blockDataAvailable.set()  # Ensure that the other thread knows data is available
+        self._events["downloadDoneEvent"].set()
+        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
         return
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
@@ -232,13 +262,13 @@ class ElevenLabsVoice:
 
         while True:
             try:
-                readData = self.q.get_nowait()
-                if len(readData) == 0 and not self.downloadDoneEvent.is_set():
+                readData = self._q.get_nowait()
+                if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
                     logging.debug("An empty item got into the queue. Skip it.")
                     continue
                 break
             except queue.Empty as e:
-                if self.downloadDoneEvent.is_set():
+                if self._events["downloadDoneEvent"].is_set():
                     logging.debug("Download (and playback) finished.")  # We're done.
                     raise sd.CallbackStop
                 else:
@@ -258,10 +288,10 @@ class ElevenLabsVoice:
             outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
         elif len(readData) == 0:
             logging.debug("Callback got no data from the queue. Checking if playback is over...")
-            with self.bytesLock:
-                oldPos = self.bytesFile.tell()
-                endPos = self.bytesFile.seek(0, os.SEEK_END)
-                if oldPos == endPos and self.downloadDoneEvent.is_set():
+            with self._bytesLock:
+                oldPos = self._bytesFile.tell()
+                endPos = self._bytesFile.seek(0, os.SEEK_END)
+                if oldPos == endPos and self._events["downloadDoneEvent"].is_set():
                     logging.debug("EOF reached and download over! Stopping callback...")
                     raise sd.CallbackStop
                 else:
@@ -271,21 +301,21 @@ class ElevenLabsVoice:
             outdata[:] = readData
     #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
     def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype="float32"):
-        readData = self.bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+        readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
         if len(readData) == 0:
             logging.debug("No data read.")
             logging.debug("Frame counter must be outdated, recreating soundfile...")
-            self.bytesFile.seek(0)
-            newSF = sf.SoundFile(self.bytesFile)
-            newSF.seek(self.bytesSoundFile.tell())
-            self.bytesSoundFile = newSF
-            readData = self.bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+            self._bytesFile.seek(0)
+            newSF = sf.SoundFile(self._bytesFile)
+            newSF.seek(self._bytesSoundFile.tell())
+            self._bytesSoundFile = newSF
+            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
             logging.debug("Now read " + str(len(readData)) + " bytes. I sure fucking hope that number isn't zero.")
         return readData
 
     def _insert_into_queue_from_download_thread(self) -> bytes:
-        self.blockDataAvailable.wait()  # Wait until a block of data is available.
-        self.bytesLock.acquire()
+        self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
+        self._bytesLock.acquire()
         try:
             readData = self._soundFile_read_and_fix(playbackBlockSize)
         except AssertionError as e:
@@ -299,35 +329,21 @@ class ElevenLabsVoice:
                 readData = b""
 
         logging.debug("Checking remaining bytes...")
-        currentPos = self.bytesFile.tell()
-        self.bytesFile.seek(0, os.SEEK_END)
-        endPos = self.bytesFile.tell()
+        currentPos = self._bytesFile.tell()
+        self._bytesFile.seek(0, os.SEEK_END)
+        endPos = self._bytesFile.tell()
         logging.debug("Remaining file length: " + str(endPos - currentPos) + "\n")
-        self.bytesFile.seek(currentPos)
+        self._bytesFile.seek(currentPos)
         remainingBytes = endPos - currentPos
 
-        if remainingBytes < playbackBlockSize and not self.downloadDoneEvent.is_set():
+        if remainingBytes < playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
             logging.debug("Marking no available blocks...")
-            self.blockDataAvailable.clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
+            self._events["blockDataAvailable"].clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
 
         logging.debug("Read bytes: " + str(len(readData)) + "\n")
 
-        self.bytesLock.release()
+        self._bytesLock.release()
         return readData
-
-
-
-
-    def get_samples(self) -> list[ElevenLabsSample]:
-        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
-        outputList = list()
-        samplesData = response.json()["samples"]
-        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
-        for sampleData in samplesData:
-            outputList.append(ElevenLabsSample(sampleData, self))
-        return outputList
-
-
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None) -> None:
         """
         Plays the preview audio.
@@ -359,8 +375,6 @@ class ElevenLabsVoice:
             raise RuntimeError("No preview URL available!")
         response = requests.get(previewURL, allow_redirects=True)
         return response.content
-
-
     def get_settings(self) -> dict:
         """
         Get the name of the current voice.
@@ -413,14 +427,112 @@ class ElevenLabsVoice:
         payload = {"stability": stability, "similarity_boost": similarity_boost}
         api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
-    def edit_name(self, newName:str):
+    @property
+    def category(self):
+        return self._category
+    @property
+    def labels(self):
+        return self._labels
+
+    # Since the same voice can be available for multiple users, we allow the user to change which API key is used.
+    @property
+    def linkedUser(self):
         """
-        Edit the name of the current voice.
+        Returns the user currently linked to the voice, whose API key will be used.
+
+        Returns:
+            ElevenLabsUser: The user linked to the voice.
+
+        """
+        return self._linkedUser
+
+    @linkedUser.setter
+    def linkedUser(self, newUser: ElevenLabsUser):
+        """
+        Set the user linked to the voice, whose API key will be used.
+
+        Args:
+            newUser (ElevenLabsUser): The new user to link to the voice.
+
+        Returns:
+            None
+
+        """
+        self._linkedUser = newUser
+
+    @property
+    def voiceID(self):
+        return self._voiceID
+
+
+class ElevenLabsGeneratedVoice(ElevenLabsVoice):
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None):
+        """
+        Edit the name/labels of the voice.
 
         Args:
             newName (str): The new name for the voice.
+            newLabels (str): The new labels for the voice.
         """
-        payload = {"name":newName}
+        if newName is None:
+            newName = self.get_name()
+        payload = {"name": newName}
+
+        if newLabels is not None:
+            if len(newLabels.keys()) > 5:
+                raise ValueError("Too many labels! The maximum amount is 5.")
+            payload["labels"] = newLabels
+        api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
+    def delete_voice(self):
+        """
+        This function deletes the current voice.
+
+        Returns:
+            None
+
+        Raises:
+            RuntimeError: If the voice is a premade voice.
+
+        """
+        if self._category == "premade":
+            raise RuntimeError("Cannot delete premade voices!")
+        response = api_del("/voices/"+self._voiceID, self._linkedUser.headers)
+        self._voiceID = ""
+
+
+class ElevenLabsClonedVoice(ElevenLabsVoice):
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+
+    def get_samples(self) -> list[ElevenLabsSample]:
+        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        outputList = list()
+        samplesData = response.json()["samples"]
+        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
+        for sampleData in samplesData:
+            outputList.append(ElevenLabsSample(sampleData, self))
+        return outputList
+
+    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None):
+        """
+        Edit the name/labels of the voice.
+
+        Args:
+            newName (str): The new name for the voice.
+            newLabels (str): The new labels for the voice.
+        """
+        if newName is None:
+            newName = self.get_name()
+        payload = {"name": newName}
+
+        if newLabels is not None:
+            if len(newLabels.keys()) > 5:
+                raise ValueError("Too many labels! The maximum amount is 5.")
+            payload["labels"] = newLabels
         api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
 
     def add_samples_by_path(self, samples:list[str]):
@@ -486,37 +598,3 @@ class ElevenLabsVoice:
             raise RuntimeError("Cannot delete premade voices!")
         response = api_del("/voices/"+self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
-
-    @property
-    def category(self):
-        return self._category
-
-    # Since the same voice can be available for multiple users, we allow the user to change which API key is used.
-    @property
-    def linkedUser(self):
-        """
-        Returns the user currently linked to the voice, whose API key will be used.
-
-        Returns:
-            ElevenLabsUser: The user linked to the voice.
-
-        """
-        return self._linkedUser
-
-    @linkedUser.setter
-    def linkedUser(self, newUser: ElevenLabsUser):
-        """
-        Set the user linked to the voice, whose API key will be used.
-
-        Args:
-            newUser (ElevenLabsUser): The new user to link to the voice.
-
-        Returns:
-            None
-
-        """
-        self._linkedUser = newUser
-
-    @property
-    def voiceID(self):
-        return self._voiceID

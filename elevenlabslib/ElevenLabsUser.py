@@ -4,6 +4,9 @@ import zipfile
 
 from typing import TYPE_CHECKING, BinaryIO
 
+from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
+from elevenlabslib.ElevenLabsVoice import ElevenLabsGeneratedVoice
+
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
@@ -90,7 +93,7 @@ class ElevenLabsUser:
         subData = self._get_subscription_data()
         return subData["next_invoice"]
 
-    def get_available_voices(self) -> list[ElevenLabsVoice]:
+    def get_available_voices(self) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
         """
         Gets a list of all available voices.
 
@@ -102,10 +105,10 @@ class ElevenLabsUser:
         voicesData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
-            availableVoices.append(ElevenLabsVoice(voiceData, self))
+            availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
         return availableVoices
 
-    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice:
+    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice:
         """
         Gets a specific voice by ID.
 
@@ -113,14 +116,12 @@ class ElevenLabsUser:
             voiceID (str): The ID of the voice to get.
 
         Returns:
-            ElevenLabsVoice: The requested voice.
+            ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice: The requested voice.
         """
         response = api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
-        return ElevenLabsVoice(voiceData, self)
-
-    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice]:
+        return ElevenLabsVoice.voiceFactory(voiceData, self)
+    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
         """
         Gets a list of voices with the given name.
 
@@ -128,7 +129,7 @@ class ElevenLabsUser:
             voiceName (str): The name of the voices to get.
 
         Returns:
-            list[ElevenLabsVoice]: A list of matching voices.
+            list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]: A list of matching voices.
         """
         allVoices = self.get_available_voices()
         matchingVoices = list()
@@ -212,9 +213,9 @@ class ElevenLabsUser:
 
         return downloadedHistoryItems
 
-    def create_voice_by_path(self, name:str, samples: list[str]) -> ElevenLabsVoice:
+    def clone_voice_by_path(self, name:str, samples: list[str]) -> ElevenLabsClonedVoice:
         """
-            Create a new ElevenLabsVoice object by providing the voice name and a list of sample file paths.
+            Create a new ElevenLabsGeneratedVoice object by providing the voice name and a list of sample file paths.
 
             Args:
                 name (str): Name of the voice to be created.
@@ -230,11 +231,11 @@ class ElevenLabsUser:
             else:
                 fileName = samplePath
             sampleBytes[fileName] = open(samplePath, "rb").read()
-        return self.create_voice_bytes(name, sampleBytes)
+        return self.clone_voice_bytes(name, sampleBytes)
 
-    def create_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ElevenLabsVoice:
+    def clone_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ElevenLabsClonedVoice:
         """
-            Create a new ElevenLabsVoice object by providing the voice name and a dictionary of sample file names and bytes.
+            Create a new ElevenLabsGeneratedVoice object by providing the voice name and a dictionary of sample file names and bytes.
 
             Args:
                 name (str): Name of the voice to be created.

@@ -10,8 +10,8 @@ from elevenlabslib import *
 def main():
     if os.path.exists("config.json"):
         configData = json.load(open("config.json","r"))
-        apiKey = configData["api_key_2"]
-        apiKey2 = configData["api_key"]
+        apiKey = configData["api_key"]
+        apiKey2 = configData["api_key_2"]
         samplePath1 = configData["sample_path_1"]
         samplePath2 = configData["sample_path_2"]
     else:
@@ -44,7 +44,7 @@ def main():
 
     if user.get_voice_clone_available():
         #Create the new voice by uploading the sample as bytes
-        newVoice = user.create_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
+        newVoice = user.clone_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
         #This can also be done by using the path:
         #newVoice = user.create_voice_by_path("TESTNAME", samplePath1)
 
@@ -83,7 +83,7 @@ def main():
                 sample.delete()
 
         #Change the voice name:
-        newVoice.edit_name("newName")
+        newVoice.edit_voice(newName="newName")
 
         #Showcase how despite the name being changed, the initialName DOES NOT.
         print("newVoice.get_name(): " + newVoice.get_name())
@@ -123,7 +123,7 @@ def main():
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
     premadeVoice = user.get_voices_by_name("Rachel")[0]
-
+    print("")
     #Playback in blocking mode.
     premadeVoice.generate_and_play_audio("This is a test to see how much faster the playback is when using the streaming method.", playInBackground=False, portaudioDeviceID=6)
 
@@ -135,6 +135,38 @@ def main():
         play(premadeVoice.generate_audio_bytes("Test."))
     except:
         print("Couldn't generate an output, likely out of tokens.")
+
+
+    file = open("script.txt", "r")
+    allLines = file.readlines()
+    user = ElevenLabsUser("api_key")
+
+    if not os.path.isdir("voices"):
+        os.mkdir("voices")
+    characterNameAssociations:dict[str, str] = json.load(open("voiceConfig.json","r"))
+    characterAssociations:dict[str, ElevenLabsVoice] = dict()
+    for key, value in characterNameAssociations:
+        characterAssociations[key] = user.get_voices_by_name(value)[0]
+
+        path = os.path.join("voices", key)
+        if not os.path.exists(path):
+            os.mkdir(path)
+
+    for line in allLines:
+        if line[0] == "@":
+            #We know it's a character speaking
+            characterName = line[1:line.index(":")] #Cut out just the character name
+            voice = characterAssociations[characterName]
+            #Generate the audio
+            mp3Bytes = voice.generate_audio_bytes(line[line.index(":")+1:])
+            wavBytes = convert_to_wav_bytes(mp3Bytes)
+            i = 0
+            #Save the audio as characterNameX.wav
+            filepath = os.path.join("voices",characterName, characterName + "-"+ str(i)+".wav")
+            while os.path.exists(filepath):
+                i = i+1
+                filepath = os.path.join("voices", characterName, characterName + "-" + str(i) + ".wav")
+            open(filepath,"wb").write(wavBytes)
 
 
     #Let's change which API key we use to generate samples with this voice
@@ -153,6 +185,29 @@ def main():
                 print("Found test history item, playing it back and deleting it.")
                 play(historyItem.get_audio_bytes())
                 historyItem.delete()
+
+
+def getNumber(prompt, minValue, maxValue) -> int:
+    print(prompt)
+    chosenVoiceIndex = -1
+    while not (minValue <= chosenVoiceIndex <= maxValue):
+        try:
+            chosenVoiceIndex = int(input("Input a number between " + str(minValue) +" and " + str(maxValue)+"\n"))
+        except:
+            print("Not a valid number.")
+    return chosenVoiceIndex
+
+def chooseFromListOfStrings(prompt, options:list[str]) -> str:
+    print(prompt)
+    if len(options) == 1:
+        print("Choosing the only available option: " + options[0])
+        return options[0]
+
+    for index, option in enumerate(options):
+        print(str(index+1) + ") " + option)
+
+    chosenOption = getNumber("", 1, len(options))-1
+    return options[chosenOption]
 
 
 def play(bytesData):
