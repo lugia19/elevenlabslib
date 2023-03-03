@@ -9,7 +9,6 @@ from typing import BinaryIO, Optional
 
 import soundfile as sf
 import sounddevice as sd
-import numpy
 
 from typing import TYPE_CHECKING
 

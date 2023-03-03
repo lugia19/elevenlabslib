@@ -55,6 +55,12 @@ def pretty_print_POST(req):
     ))
 
 def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None) -> None:
+    """
+    :param audioData: The audio to play
+    :param playInBackground: Whether to play it in the background
+    :param portaudioDeviceID: The ID of the portaudioDevice to play it back on (Optional)
+    :return:
+    """
     if portaudioDeviceID is None:
         portaudioDeviceID = sd.default.device
     audioFile = io.BytesIO(audioData)

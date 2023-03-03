@@ -1,8 +1,6 @@
 import io
 import json
 import os
-import pydub.playback
-from pydub import AudioSegment
 
 import elevenlabslib.helpers
 from elevenlabslib import *
@@ -56,7 +54,7 @@ def main():
 
         #Play back the automatically generated preview:
         try:
-            play(newVoice.get_preview_bytes())
+            newVoice.play_preview(playInBackground=False)
         except:
             print("Error getting the preview. It likely hasn't been generated yet.")
 
@@ -79,7 +77,7 @@ def main():
             if sample.fileName == firstSampleFileName:
                 print("Found the sample we want to delete.")
                 print(sample.fileName)
-                play(sample.get_audio_bytes())
+                sample.play_audio(playInBackground=False)
                 sample.delete()
 
         #Change the voice name:
@@ -132,49 +130,16 @@ def main():
     print("FUCK")
     #Generate a test sample
     try:
-        play(premadeVoice.generate_audio_bytes("Test."))
+        premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
     except:
         print("Couldn't generate an output, likely out of tokens.")
-
-
-    file = open("script.txt", "r")
-    allLines = file.readlines()
-    user = ElevenLabsUser("api_key")
-
-    if not os.path.isdir("voices"):
-        os.mkdir("voices")
-    characterNameAssociations:dict[str, str] = json.load(open("voiceConfig.json","r"))
-    characterAssociations:dict[str, ElevenLabsVoice] = dict()
-    for key, value in characterNameAssociations:
-        characterAssociations[key] = user.get_voices_by_name(value)[0]
-
-        path = os.path.join("voices", key)
-        if not os.path.exists(path):
-            os.mkdir(path)
-
-    for line in allLines:
-        if line[0] == "@":
-            #We know it's a character speaking
-            characterName = line[1:line.index(":")] #Cut out just the character name
-            voice = characterAssociations[characterName]
-            #Generate the audio
-            mp3Bytes = voice.generate_audio_bytes(line[line.index(":")+1:])
-            wavBytes = convert_to_wav_bytes(mp3Bytes)
-            i = 0
-            #Save the audio as characterNameX.wav
-            filepath = os.path.join("voices",characterName, characterName + "-"+ str(i)+".wav")
-            while os.path.exists(filepath):
-                i = i+1
-                filepath = os.path.join("voices", characterName, characterName + "-" + str(i) + ".wav")
-            open(filepath,"wb").write(wavBytes)
-
 
     #Let's change which API key we use to generate samples with this voice
     newUser = ElevenLabsUser(apiKey2)
     premadeVoice.linkedUser = newUser
 
     try:
-        play(premadeVoice.generate_audio_bytes("Test."))
+        premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
     except:
         print("Couldn't generate an output, likely out of tokens.")
 
@@ -183,7 +148,7 @@ def main():
         for historyItem in account.get_history_items():
             if historyItem.text == "Test.":
                 print("Found test history item, playing it back and deleting it.")
-                play(historyItem.get_audio_bytes())
+                historyItem.play_audio(playInBackground=False)
                 historyItem.delete()
 
 
@@ -209,21 +174,8 @@ def chooseFromListOfStrings(prompt, options:list[str]) -> str:
     chosenOption = getNumber("", 1, len(options))-1
     return options[chosenOption]
 
-
-def play(bytesData):
-    print("Playing back file that's " + str(len(bytesData)) + " bytes in size.")
-    sound = AudioSegment.from_file_using_temporary_files(io.BytesIO(bytesData))
-    pydub.playback.play(sound)
-    return
-
 #This function uses pydub (and io) to convert the bytes of an mp3 file to the bytes of a wav file.
 #I use it so I can play back the audio using pyaudio instead of pydub (which allows you to choose the output device).
-def convert_to_wav_bytes(mp3Bytes:bytes) -> bytes:
-    wavBytes = io.BytesIO()
-    sound = AudioSegment.from_file_using_temporary_files(io.BytesIO(mp3Bytes), format="mp3")
-    sound.export(wavBytes, format="wav")
-    wavBytes.seek(0)
-    return wavBytes.read()
 
 
 
