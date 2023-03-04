@@ -3,9 +3,11 @@ Python wrapper for the full elevenlabs API.
 
 # Installation
 
-Just run `pip install elevenlabslib`, it's on pypi.
+Just run `pip install elevenlabslib`, it's on [pypi](https://pypi.org/project/elevenlabslib/).
 
 # Usage
+
+### **For a far more comprehensive example, check [example.py](https://github.com/lugia19/elevenlabslib/blob/master/example.py).**
 
 Here is a very simple usage sample. 
 - Retrieves a voice based on the name
@@ -29,5 +31,3 @@ for historyItem in user.get_history_items():
         historyItem.delete()
         break
 ```
-
-For a far more comprehensive example, check `example.py` on the github repo.
