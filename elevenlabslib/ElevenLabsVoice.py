@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import io
 import os
 import queue
 
 import threading
-from typing import BinaryIO, Optional
+from typing import Optional
 
 import soundfile as sf
 import sounddevice as sd
@@ -17,15 +16,32 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
 
-playbackBlockSize = 2048
-downloadChunkSize = 4096
-playbackBufferSizeInBlocks = 20
-
+# These are hardcoded because they just plain work. If you really want to change them, please be careful.
+_playbackBlockSize = 2048
+_downloadChunkSize = 4096
+_playbackBufferSizeInBlocks = 20
 class ElevenLabsVoice:
     """
     Represents a voice in the ElevenLabs API.
     It's the parent class for all voices, and used directly for the premade ones.
     """
+    @staticmethod
+    def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None, playbackBufferSizeInBlocks=None) -> None:
+        """
+        This function lets you override the values used for the streaming function FOR ALL VOICES.
+        Please only do this if you know what you're doing.
+        :param playbackBlockSize: The size (in bytes) of the byte blocks used for playback.
+        :param downloadChunkSize: The size (in bytes) of the chunks to be downloaded.
+        :param playbackBufferSizeInBlocks: How many blocks the queue should contain max.
+        """
+        global _playbackBlockSize, _downloadChunkSize, _playbackBufferSizeInBlocks
+        if playbackBlockSize is not None:
+            _playbackBlockSize = playbackBlockSize
+        if downloadChunkSize is not None:
+            _downloadChunkSize = downloadChunkSize
+        if playbackBufferSizeInBlocks is not None:
+            _playbackBufferSizeInBlocks = playbackBufferSizeInBlocks
+
     @staticmethod
     def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice:
         """
@@ -59,7 +75,7 @@ class ElevenLabsVoice:
         self._category = voiceData["category"]
         self._labels = voiceData["labels"]
 
-        self._q = queue.Queue(maxsize=playbackBufferSizeInBlocks)
+        self._q = None
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None    #Needs to be created later.
         self._bytesLock = threading.Lock()
@@ -147,7 +163,7 @@ class ElevenLabsVoice:
         None
         """
         #Clean all the buffers and reset all events.
-        self._q = queue.Queue(maxsize=playbackBufferSizeInBlocks)
+        self._q = queue.Queue(maxsize=_playbackBufferSizeInBlocks)
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
         for eventName, event in self._events.items():
@@ -180,26 +196,41 @@ class ElevenLabsVoice:
                 self._events["soundFileReadyEvent"].set()
 
         stream = sd.RawOutputStream(
-            samplerate=self._bytesSoundFile.samplerate, blocksize=playbackBlockSize,
+            samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
             device=portaudioDeviceID, channels=self._bytesSoundFile.channels, dtype='float32',
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
         logging.debug("Starting playback...")
         with stream:
-            timeout = playbackBlockSize * playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
-            # data = getDataFromDownload(bytesSoundFile)
+            timeout = _playbackBlockSize * _playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
+            # Since I can't find any way to get the buffer size from soundfile,
+            # we will just assume the first read operation gives back a complete chunk
+            # and use that to check later reads. This SHOULD be accurate. Hopefully.
+            # Maybe there's like a weird edge case or something, hopefully not.
+            likelyReadChunkSize = -1
             while True:
                 data = self._insert_into_queue_from_download_thread()
-                if data != b"":
+                if likelyReadChunkSize == -1:
+                    likelyReadChunkSize = len(data)
+                if len(data) >= likelyReadChunkSize:
                     logging.debug("Putting " + str(len(data)) + " bytes in queue.")
                     self._q.put(data, timeout=timeout)
                 else:
-                    logging.debug("Got back no data, let's not write that to the queue...")
+                    logging.debug("Got back less data than expected, check if we're at the end...")
                     with self._bytesLock:
-                        oldPos = self._bytesFile.tell()
+                        # This needs to use bytes rather than frames left, as sometimes the number of frames left is wrong.
+                        curPos = self._bytesFile.tell()
                         endPos = self._bytesFile.seek(0, os.SEEK_END)
-                        self._bytesFile.seek(oldPos)
-                        if endPos == oldPos and self._events["downloadDoneEvent"].is_set():
+                        self._bytesFile.seek(curPos)
+                        if endPos == curPos and self._events["downloadDoneEvent"].is_set():
+                            logging.debug("We're at the end.")
+                            if data != b"":
+                                logging.debug("Still some data left, writing it...")
+                                logging.debug("Putting " + str(len(data)) +
+                                      " bytes in queue.")
+                                self._q.put(data, timeout=timeout)
                             break
+                        else:
+                            print("We're not at the end. Wait for more data.")
             logging.debug("While loop done.")
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             logging.debug(stream.active)
@@ -216,7 +247,7 @@ class ElevenLabsVoice:
         streamedRequest.raise_for_status()
         totalLength = 0
         logging.debug("Starting iter...")
-        for chunk in streamedRequest.iter_content(chunk_size=downloadChunkSize):
+        for chunk in streamedRequest.iter_content(chunk_size=_downloadChunkSize):
             if self._events["headerReadyEvent"].is_set():
                 logging.debug("HeaderReady is set, waiting for the soundfile...")
                 self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
@@ -225,7 +256,7 @@ class ElevenLabsVoice:
                     self._events["soundFileReadyEvent"].clear()
 
             totalLength += len(chunk)
-            if len(chunk) != downloadChunkSize:
+            if len(chunk) != _downloadChunkSize:
                 logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
 
             # Write the new data then seek back to the initial position.
@@ -243,7 +274,7 @@ class ElevenLabsVoice:
                     endPos = self._bytesFile.tell()
                     self._bytesFile.seek(lastReadPos)
                     logging.debug("Write head move: " + str(endPos - lastWritePos))
-                    if endPos - lastReadPos > playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
+                    if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
                         logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
                         self._events["blockDataAvailable"].set()
 
@@ -253,7 +284,7 @@ class ElevenLabsVoice:
         return
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
-        assert frames == playbackBlockSize
+        assert frames == _playbackBlockSize
         if status.output_underflow:
             logging.error('Output underflow: increase blocksize?')
             raise sd.CallbackAbort
@@ -316,7 +347,7 @@ class ElevenLabsVoice:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()
         try:
-            readData = self._soundFile_read_and_fix(playbackBlockSize)
+            readData = self._soundFile_read_and_fix(_playbackBlockSize)
         except AssertionError as e:
             logging.debug("Exception in buffer_read (likely not enough data left), read what is available...")
             try:
@@ -335,7 +366,7 @@ class ElevenLabsVoice:
         self._bytesFile.seek(currentPos)
         remainingBytes = endPos - currentPos
 
-        if remainingBytes < playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
+        if remainingBytes < _playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
             logging.debug("Marking no available blocks...")
             self._events["blockDataAvailable"].clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
 
