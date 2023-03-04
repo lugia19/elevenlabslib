@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
 from elevenlabslib.helpers import *
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 
 
 class ElevenLabsUser:
@@ -29,7 +30,7 @@ class ElevenLabsUser:
         self._headers["xi-api-key"] = self._xi_api_key
 
     def _get_subscription_data(self) -> dict:
-        response = api_get("/user/subscription",self._headers)
+        response = _api_get("/user/subscription", self._headers)
         subscriptionData = response.json()
         return subscriptionData
 
@@ -100,7 +101,7 @@ class ElevenLabsUser:
         Returns:
             list[ElevenLabsVoice]: A list of available voices.
         """
-        response = api_get("/voices", headers=self._headers)
+        response = _api_get("/voices", headers=self._headers)
         availableVoices: list[ElevenLabsVoice] = list()
         voicesData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
@@ -118,7 +119,7 @@ class ElevenLabsUser:
         Returns:
             ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice: The requested voice.
         """
-        response = api_get("/voices/" + voiceID, headers=self._headers)
+        response = _api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
         return ElevenLabsVoice.voiceFactory(voiceData, self)
     def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
@@ -146,7 +147,7 @@ class ElevenLabsUser:
             list[ElevenLabsHistoryItem]: A list of history items.
         """
         outputList = list()
-        response = api_get("/history", headers=self._headers)
+        response = _api_get("/history", headers=self._headers)
         historyData = response.json()
         from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
         for value in historyData["history"]:
@@ -169,7 +170,7 @@ class ElevenLabsUser:
             historyItemsByID[item.historyID] = item
 
         payload = {"history_item_ids": list(historyItemsByID.keys())}
-        response = api_json("/history/download", headers=self._headers, jsonData=payload)
+        response = _api_json("/history/download", headers=self._headers, jsonData=payload)
 
         if len(historyItems) == 1:
             downloadedHistoryItems = {historyItems[0]: response.content}
@@ -197,7 +198,7 @@ class ElevenLabsUser:
                 dict[str, bytes]: Dictionary where the key is the history ID and the value is the bytes of the mp3 file.
             """
         payload = {"history_item_ids": historyItemIDs}
-        response = api_json("/history/download", headers=self._headers, jsonData=payload)
+        response = _api_json("/history/download", headers=self._headers, jsonData=payload)
 
         if len(historyItemIDs) == 1:
             downloadedHistoryItems = {historyItemIDs[0]: response.content}
@@ -253,5 +254,5 @@ class ElevenLabsUser:
         files = list()
         for fileName, fileBytes in samples.items():
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
-        response = api_multipart("/voices/add", self._headers, data=payload, filesData=files)
+        response = _api_multipart("/voices/add", self._headers, data=payload, filesData=files)
         return self.get_voice_by_ID(response.json()["voice_id"])

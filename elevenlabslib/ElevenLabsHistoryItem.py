@@ -1,6 +1,7 @@
 from __future__ import annotations
 from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 
 
 class ElevenLabsHistoryItem:
@@ -35,7 +36,7 @@ class ElevenLabsHistoryItem:
         Returns:
             bytes: a bytes object containing the audio in mp3 format.
         """
-        response = api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
+        response = _api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
         return response.content
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
@@ -53,7 +54,7 @@ class ElevenLabsHistoryItem:
         """
         Deletes the history item.
         """
-        response = api_del("/history/" + self.historyID, self._parentUser.headers)
+        response = _api_del("/history/" + self.historyID, self._parentUser.headers)
         self._historyID = ""
 
     @property

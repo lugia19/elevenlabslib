@@ -1,6 +1,7 @@
 from __future__ import annotations
 from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
 from elevenlabslib.helpers import *
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 
 class ElevenLabsSample:
     def __init__(self, sampleData, parentVoice:ElevenLabsVoice):
@@ -18,7 +19,7 @@ class ElevenLabsSample:
         Returns:
             bytes: a bytes object containing the audio in mp3 format.
         """
-        response = api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
+        response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
         return response.content
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
@@ -36,7 +37,7 @@ class ElevenLabsSample:
         """
         Deletes the sample.
         """
-        response = api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID, self._parentVoice.linkedUser.headers)
+        response = _api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID, self._parentVoice.linkedUser.headers)
         self._sampleID = ""
 
     @property

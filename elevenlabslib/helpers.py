@@ -1,8 +1,9 @@
 import io
 import logging
-from typing import Optional
+from typing import Optional, BinaryIO
 
 import sounddevice as sd
+import soundfile
 import soundfile as sf
 import requests
 
@@ -31,22 +32,22 @@ def _api_call(requestType, path, headers, jsonData=None, filesData=None) -> requ
         response.raise_for_status()
         return response
     except requests.exceptions.RequestException as e:
-        pretty_print_POST(response.request)
+        _pretty_print_POST(response.request)
         raise e
 
-def api_get(path, headers) -> requests.Response:
+def _api_get(path, headers) -> requests.Response:
     return _api_call("get",path, headers)
 
-def api_del(path, headers) -> requests.Response:
+def _api_del(path, headers) -> requests.Response:
     return _api_call("del",path, headers)
 
-def api_json(path, headers, jsonData) -> requests.Response:
+def _api_json(path, headers, jsonData) -> requests.Response:
     return _api_call("json",path, headers, jsonData)
 
-def api_multipart(path, headers, data=None, filesData=None):
+def _api_multipart(path, headers, data=None, filesData=None):
     return _api_call("multipart", path, headers, data, filesData)
 
-def pretty_print_POST(req):
+def _pretty_print_POST(req):
     logging.error('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
         '-----------START-----------',
         req.method + ' ' + req.url,
@@ -66,3 +67,21 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
     audioFile = io.BytesIO(audioData)
     soundFile = sf.SoundFile(audioFile)
     sd.play(soundFile.read(), samplerate=soundFile.samplerate, blocking=not playInBackground, device=portaudioDeviceID)
+
+def save_bytes_to_path(filepath:str, audioData:bytes) -> None:
+    """
+    :param filepath: The path where the data will be saved to.
+    :param audioData: The audio data.
+    """
+    fp = open(filepath, "wb")
+    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
+    sf.write(fp,tempSoundFile.read(), tempSoundFile.samplerate)
+
+def save_bytes_to_file_object(fp:BinaryIO, audioData:bytes, outputFormat="mp3") -> None:
+    """
+    :param fp: The file-like object the data will be saved to.
+    :param audioData: The audio data.
+    :param outputFormat: The output format (mp3 by default).
+    """
+    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
+    sf.write(fp,tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)

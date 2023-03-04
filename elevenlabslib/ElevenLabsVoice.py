@@ -11,10 +11,14 @@ import sounddevice as sd
 
 from typing import TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsSample import ElevenLabsSample
     from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+
 from elevenlabslib.helpers import *
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
+
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -127,7 +131,7 @@ class ElevenLabsVoice:
         #The output from the site is an mp3 file.
         #You can check the README for an example of how to convert it to wav on the fly using pydub and bytesIO.
         payload = self._generate_payload(prompt, stability, similarity_boost)
-        response = api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
+        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
 
 
         return response.content
@@ -413,7 +417,7 @@ class ElevenLabsVoice:
             str: The name of the voice.
         """
         # We don't store the name OR the settings, as they can be changed externally.
-        response = api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
+        response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
         return response.json()
 
     def get_name(self) -> str:
@@ -423,7 +427,7 @@ class ElevenLabsVoice:
         Returns:
             str: The name of the voice.
         """
-        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
         return response.json()["name"]
 
     def get_preview_url(self) -> str|None:
@@ -433,7 +437,7 @@ class ElevenLabsVoice:
         Returns:
             str|None: The preview URL of the voice, or None if it doesn't exist.
         """
-        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
         return response.json()["preview_url"]
 
     def edit_settings(self, stability:float=None, similarity_boost:float=None):
@@ -455,7 +459,7 @@ class ElevenLabsVoice:
         if not(0 <= stability <= 1 and 0 <= similarity_boost <= 1):
             raise ValueError("Please provide a value between 0 and 1.")
         payload = {"stability": stability, "similarity_boost": similarity_boost}
-        api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
+        _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
     @property
     def category(self):
@@ -515,7 +519,7 @@ class ElevenLabsGeneratedVoice(ElevenLabsVoice):
             if len(newLabels.keys()) > 5:
                 raise ValueError("Too many labels! The maximum amount is 5.")
             payload["labels"] = newLabels
-        api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
+        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
     def delete_voice(self):
         """
         This function deletes the current voice.
@@ -529,7 +533,7 @@ class ElevenLabsGeneratedVoice(ElevenLabsVoice):
         """
         if self._category == "premade":
             raise RuntimeError("Cannot delete premade voices!")
-        response = api_del("/voices/"+self._voiceID, self._linkedUser.headers)
+        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
 
 
@@ -539,7 +543,7 @@ class ElevenLabsClonedVoice(ElevenLabsVoice):
 
 
     def get_samples(self) -> list[ElevenLabsSample]:
-        response = api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
         outputList = list()
         samplesData = response.json()["samples"]
         from elevenlabslib.ElevenLabsSample import ElevenLabsSample
@@ -563,7 +567,7 @@ class ElevenLabsClonedVoice(ElevenLabsVoice):
             if len(newLabels.keys()) > 5:
                 raise ValueError("Too many labels! The maximum amount is 5.")
             payload["labels"] = newLabels
-        api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
+        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
 
     def add_samples_by_path(self, samples:list[str]):
         """
@@ -611,7 +615,7 @@ class ElevenLabsClonedVoice(ElevenLabsVoice):
         for fileName, fileBytes in samples.items():
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
 
-        api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
+        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
 
     def delete_voice(self):
         """
@@ -626,5 +630,5 @@ class ElevenLabsClonedVoice(ElevenLabsVoice):
         """
         if self._category == "premade":
             raise RuntimeError("Cannot delete premade voices!")
-        response = api_del("/voices/"+self._voiceID, self._linkedUser.headers)
+        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
