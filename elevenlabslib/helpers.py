@@ -70,6 +70,8 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
 
 def save_bytes_to_path(filepath:str, audioData:bytes) -> None:
     """
+    This function saves the audio data to the specified location.
+    soundfile is used for the conversion, so it supports any format it does.
     :param filepath: The path where the data will be saved to.
     :param audioData: The audio data.
     """
@@ -79,6 +81,8 @@ def save_bytes_to_path(filepath:str, audioData:bytes) -> None:
 
 def save_bytes_to_file_object(fp:BinaryIO, audioData:bytes, outputFormat="mp3") -> None:
     """
+    This function saves the audio data to the specified file like object, in the specified format.
+    soundfile is used for the conversion, so it supports any format it does.
     :param fp: The file-like object the data will be saved to.
     :param audioData: The audio data.
     :param outputFormat: The output format (mp3 by default).
