@@ -2,7 +2,9 @@ import io
 import json
 import os
 
-import elevenlabslib.helpers
+import requests
+
+from elevenlabslib.helpers import *
 from elevenlabslib import *
 
 def main():
@@ -28,13 +30,13 @@ def main():
     try:
         user.get_voices_by_name("TESTNAME")[0].delete_voice()
         print("Voice found and deleted.")
-    except:
+    except IndexError:
         print("Voice not found, no need to delete it.")
 
     try:
         user.get_voices_by_name("newName")[0].delete_voice()
         print("Voice found and deleted.")
-    except:
+    except IndexError:
         print("Voice not found, no need to delete it.")
 
     # Get the filename of the first sample from the path to identify it:
@@ -55,7 +57,7 @@ def main():
         #Play back the automatically generated preview:
         try:
             newVoice.play_preview(playInBackground=False)
-        except:
+        except requests.exceptions.RequestException:
             print("Error getting the preview. It likely hasn't been generated yet.")
 
         #Get a list of all cloned voices available to the account:
@@ -101,7 +103,7 @@ def main():
             newVoice.generate_audio_bytes("Test.")
             # Generate an output overwriting the stability and/or similarity setting for this generation:
             newVoice.generate_audio_bytes("Test.", stability=0.3)
-        except:
+        except requests.exceptions.RequestException:
             print("Couldn't generate output, likely out of tokens.")
 
         #Save the voice's current name:
@@ -121,15 +123,24 @@ def main():
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
     premadeVoice = user.get_voices_by_name("Rachel")[0]
-    #Playback in blocking mode.
-    premadeVoice.generate_and_play_audio("This is a test to see how much faster the playback is when using the streaming method.", playInBackground=False, portaudioDeviceID=6)
-
-    #Playback with streaming (faster response time for longer files)
-    premadeVoice.generate_and_stream_audio("This is a test to see how much faster the playback is when using the streaming method.", 6)
-    #Generate a test sample
     try:
-        premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
-    except:
+        #Playback in normal mode, waiting for the whole file to be downloaded before playing it back.
+        premadeVoice.generate_and_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)
+
+        #Playback with streaming (without waiting for the whole file to be downloaded, so with a faster response time)
+        premadeVoice.generate_and_stream_audio("Test.", 6)
+
+        #Generate a sample and save it to disk, then play it back.
+        mp3Data = premadeVoice.generate_audio_bytes("Test.")
+        save_bytes_to_path("test.wav",mp3Data)
+        play_audio_bytes(open("test.wav","rb").read(),False,6)
+
+        #Generate a sample and save it to a file-like object, then play it back.
+        memoryFile = io.BytesIO()
+        save_bytes_to_file_object(memoryFile, mp3Data, "ogg")
+        memoryFile.seek(0)  #Seek the back to the beginning
+        play_audio_bytes(memoryFile.read(), playInBackground=False)
+    except requests.exceptions.RequestException:
         print("Couldn't generate an output, likely out of tokens.")
 
     #Let's change which API key we use to generate samples with this voice
@@ -138,7 +149,7 @@ def main():
 
     try:
         premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
-    except:
+    except requests.exceptions.RequestException:
         print("Couldn't generate an output, likely out of tokens.")
 
     #Play back and delete the test items we created from both accounts:
