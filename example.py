@@ -121,13 +121,11 @@ def main():
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
     premadeVoice = user.get_voices_by_name("Rachel")[0]
-    print("")
     #Playback in blocking mode.
     premadeVoice.generate_and_play_audio("This is a test to see how much faster the playback is when using the streaming method.", playInBackground=False, portaudioDeviceID=6)
 
     #Playback with streaming (faster response time for longer files)
     premadeVoice.generate_and_stream_audio("This is a test to see how much faster the playback is when using the streaming method.", 6)
-    print("FUCK")
     #Generate a test sample
     try:
         premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
@@ -173,10 +171,6 @@ def chooseFromListOfStrings(prompt, options:list[str]) -> str:
 
     chosenOption = getNumber("", 1, len(options))-1
     return options[chosenOption]
-
-#This function uses pydub (and io) to convert the bytes of an mp3 file to the bytes of a wav file.
-#I use it so I can play back the audio using pyaudio instead of pydub (which allows you to choose the output device).
-
 
 
 if __name__ == "__main__":
