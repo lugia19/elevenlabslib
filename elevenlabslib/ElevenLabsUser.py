@@ -153,7 +153,7 @@ class ElevenLabsUser:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
 
-    def download_multiple_history_items(self, historyItems: list[ElevenLabsHistoryItem]) -> dict[ElevenLabsHistoryItem, bytes]:
+    def download_history_items(self, historyItems: list[ElevenLabsHistoryItem]) -> dict[ElevenLabsHistoryItem, bytes]:
         """
         Download multiple history items and return a dictionary where the key is the history item
         and the value is the bytes of the mp3 file.
@@ -185,7 +185,7 @@ class ElevenLabsUser:
                 downloadedHistoryItems[historyItem] = downloadedZip.read(fileName)
         return downloadedHistoryItems
 
-    def download_multiple_history_items_by_ID(self, historyItemIDs:list[str]) -> dict[str, bytes]:
+    def download_history_items_by_ID(self, historyItemIDs:list[str]) -> dict[str, bytes]:
         """
             Download multiple history items by ID and return a dictionary where the key is the history ID
             and the value is the bytes of the mp3 file.
