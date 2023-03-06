@@ -23,10 +23,7 @@ def main():
     #Create the user object
     user = ElevenLabsUser(apiKey)
 
-    #Add a voice (uploading the sample from bytes):
-    firstSampleBytes = open(samplePath1,"rb").read()
-
-    #Delete voice if it exists already
+    #Delete voices if they already exist
     try:
         user.get_voices_by_name("TESTNAME")[0].delete_voice()
         print("Voice found and deleted.")
@@ -39,10 +36,15 @@ def main():
     except IndexError:
         print("Voice not found, no need to delete it.")
 
-    # Get the filename of the first sample from the path to identify it:
-    firstSampleFileName = samplePath1[samplePath1.rfind("\\") + 1:]
+
 
     if user.get_voice_clone_available():
+        # Add a voice (uploading the sample from bytes):
+        firstSampleBytes = open(samplePath1, "rb").read()
+
+        # Get the filename of the first sample from the path to identify it:
+        firstSampleFileName = samplePath1[samplePath1.rfind("\\") + 1:]
+
         #Create the new voice by uploading the sample as bytes
         newVoice = user.clone_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
         #This can also be done by using the path:

@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING, BinaryIO
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsGeneratedVoice
 
+
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 
@@ -121,6 +123,7 @@ class ElevenLabsUser:
         """
         response = _api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice.voiceFactory(voiceData, self)
     def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
         """
