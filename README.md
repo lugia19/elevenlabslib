@@ -5,6 +5,8 @@ Python wrapper for the full elevenlabs API.
 
 Just run `pip install elevenlabslib`, it's on [pypi](https://pypi.org/project/elevenlabslib/).
 
+Note: On Linux, you may need to install portaudio. On debian and derivatives, it's `sudo apt-get install libportaudio2`, and possibly also `sudo apt-get install python3-pyaudio`.
+
 # Usage
 
 ### **For a far more comprehensive example, check [example.py](https://github.com/lugia19/elevenlabslib/blob/master/example.py).**
