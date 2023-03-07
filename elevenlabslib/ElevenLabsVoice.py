@@ -5,6 +5,8 @@ import queue
 
 import threading
 from typing import Optional
+from typing import Callable
+
 
 import soundfile as sf
 import sounddevice as sd
@@ -153,7 +155,7 @@ class ElevenLabsVoice:
         play_audio_bytes(self.generate_audio_bytes(prompt, stability, similarity_boost), playInBackground, portaudioDeviceID)
         return
 
-    def generate_and_stream_audio(self,prompt:str, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None):
+    def generate_and_stream_audio(self,prompt:str, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None, onReady:Callable=lambda: None, onFinished:Callable=lambda:None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice in callback mode.
         It is always blocking, and can sometimes make the audio skip slightly, but the audio begins playing much more quickly.
@@ -204,6 +206,7 @@ class ElevenLabsVoice:
             device=portaudioDeviceID, channels=self._bytesSoundFile.channels, dtype='float32',
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
         logging.debug("Starting playback...")
+        onReady()
         with stream:
             timeout = _playbackBlockSize * _playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
             # Since I can't find any way to get the buffer size from soundfile,
@@ -238,6 +241,7 @@ class ElevenLabsVoice:
             logging.debug("While loop done.")
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             logging.debug(stream.active)
+        onFinished()
         logging.debug("Stream done.")
 
         return
