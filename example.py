@@ -20,6 +20,9 @@ def main():
         samplePath1 = ""
         samplePath2 = ""
 
+    #Enable logging:
+    logging.basicConfig(level=logging.DEBUG)
+
     #Create the user object
     user = ElevenLabsUser(apiKey)
 
@@ -59,7 +62,7 @@ def main():
         #Play back the automatically generated preview:
         try:
             newVoice.play_preview(playInBackground=False)
-        except requests.exceptions.RequestException:
+        except RuntimeError:
             print("Error getting the preview. It likely hasn't been generated yet.")
 
         #Get a list of all cloned voices available to the account:
@@ -102,9 +105,9 @@ def main():
         newVoice.edit_settings(stability, similarityBoost)
         try:
             # Generate an output:
-            newVoice.generate_audio_bytes("Test.")
+            newVoice.generate_and_play_audio("Test.",playInBackground=False)
             # Generate an output overwriting the stability and/or similarity setting for this generation:
-            newVoice.generate_audio_bytes("Test.", stability=0.3)
+            newVoice.generate_and_play_audio("Test.", stability=0.3,playInBackground=False)
         except requests.exceptions.RequestException:
             print("Couldn't generate output, likely out of tokens.")
 
@@ -130,7 +133,7 @@ def main():
         premadeVoice.generate_and_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)
 
         #Playback with streaming (without waiting for the whole file to be downloaded, so with a faster response time)
-        premadeVoice.generate_and_stream_audio("Test.", 6)
+        premadeVoice.generate_and_stream_audio("Test.", 6, streamInBackground=True)
 
         #Generate a sample and save it to disk, then play it back.
         mp3Data = premadeVoice.generate_audio_bytes("Test.")

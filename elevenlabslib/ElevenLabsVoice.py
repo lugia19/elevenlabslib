@@ -4,7 +4,7 @@ import os
 import queue
 
 import threading
-from typing import Optional
+from typing import Optional, Tuple, Any
 
 import soundfile as sf
 import sounddevice as sd
@@ -126,7 +126,7 @@ class ElevenLabsVoice:
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
 
         Returns:
-        	A bytes object representing the generated audio data.
+        	The bytes of the audio file, and the json data (such as the number of tokens used).
         """
         #The output from the site is an mp3 file.
         #You can check the README for an example of how to convert it to wav on the fly using pydub and bytesIO.
@@ -136,7 +136,7 @@ class ElevenLabsVoice:
 
         return response.content
 
-    def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> None:
+    def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -148,16 +148,19 @@ class ElevenLabsVoice:
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
 
         Returns:
-        None
+        The data from the response (such as the number of tokens used).
         """
-        play_audio_bytes(self.generate_audio_bytes(prompt, stability, similarity_boost), playInBackground, portaudioDeviceID)
+        audioData = self.generate_audio_bytes(prompt, stability, similarity_boost)
+        play_audio_bytes(audioData, playInBackground, portaudioDeviceID)
         return
 
-    def generate_and_stream_audio(self,prompt:str, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None):
+    def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
+                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False):
         """
         Generate audio bytes from the given prompt and play them using sounddevice in callback mode.
         It is always blocking, and can sometimes make the audio skip slightly, but the audio begins playing much more quickly.
         Parameters:
+            streamInBackground (bool): Whether or not to play the audio (and let the download complete) in a separate thread.
         	prompt (str): The text prompt to generate audio from.
         	portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
         	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
@@ -166,7 +169,18 @@ class ElevenLabsVoice:
         Returns:
         None
         """
-        #Clean all the buffers and reset all events.
+        if streamInBackground:
+            mainThread = threading.Thread(target=self._generate_and_stream_audio_inner, args=(prompt, portaudioDeviceID, stability, similarity_boost))
+            mainThread.start()
+        else:
+            self._generate_and_stream_audio_inner(prompt, portaudioDeviceID, stability, similarity_boost)
+
+        return
+
+
+    def _generate_and_stream_audio_inner(self, prompt:str, portaudioDeviceID:Optional[int] = None,
+                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None):
+        # Clean all the buffers and reset all events.
         self._q = queue.Queue(maxsize=_playbackBufferSizeInBlocks)
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
@@ -230,7 +244,7 @@ class ElevenLabsVoice:
                             if data != b"":
                                 logging.debug("Still some data left, writing it...")
                                 logging.debug("Putting " + str(len(data)) +
-                                      " bytes in queue.")
+                                              " bytes in queue.")
                                 self._q.put(data, timeout=timeout)
                             break
                         else:
@@ -239,12 +253,11 @@ class ElevenLabsVoice:
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             logging.debug(stream.active)
         logging.debug("Stream done.")
-
         return
 
     def _stream_downloader_function(self, path, payload):
         # This is the function running in the download thread.
-        #testURL = ""
+        #testURL = "https://litter.catbox.moe/sk8cwj.mp3"
         #streamedRequest = requests.get(testURL, stream=True)
         streamedRequest = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
 
