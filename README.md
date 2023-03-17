@@ -7,6 +7,8 @@ Just run `pip install elevenlabslib`, it's on [pypi](https://pypi.org/project/el
 
 Note: On Linux, you may need to install portaudio. On debian and derivatives, it's `sudo apt-get install libportaudio2`, and possibly also `sudo apt-get install python3-pyaudio`.
 
+**IMPORTANT**: The library requires libsndfile `v1.1.0` or newer, as that is when mp3 support was introduced. This won't be an issue on Windows, but may be relevant on other platforms. Check the [soundfile](https://github.com/bastibe/python-soundfile#installation) repo for more information.
+
 # Usage
 
 ### **For a far more comprehensive example, check [example.py](https://github.com/lugia19/elevenlabslib/blob/master/example.py).**
