@@ -70,7 +70,7 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
     if portaudioDeviceID is None:
         portaudioDeviceID = sd.default.device[1]
 
-    playbackWrapper = SDPlaybackWrapper(audioData, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+    playbackWrapper = _SDPlaybackWrapper(audioData, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
     if not playInBackground:
         with playbackWrapper.stream:
@@ -102,7 +102,7 @@ def save_bytes_to_file_object(fp:BinaryIO, audioData:bytes, outputFormat="mp3") 
 
 
 #This class just helps with the callback stuff.
-class SDPlaybackWrapper:
+class _SDPlaybackWrapper:
     def __init__(self, audioData, deviceID, onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         soundFile = sf.SoundFile(io.BytesIO(audioData))
         soundFile.seek(0)

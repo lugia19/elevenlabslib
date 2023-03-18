@@ -23,28 +23,24 @@ from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
 _downloadChunkSize = 4096
-_playbackBufferSizeInBlocks = 20
 class ElevenLabsVoice:
     """
     Represents a voice in the ElevenLabs API.
     It's the parent class for all voices, and used directly for the premade ones.
     """
     @staticmethod
-    def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None, playbackBufferSizeInBlocks=None) -> None:
+    def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
         """
         This function lets you override the values used for the streaming function FOR ALL VOICES.
         Please only do this if you know what you're doing.
         :param playbackBlockSize: The size (in bytes) of the byte blocks used for playback.
         :param downloadChunkSize: The size (in bytes) of the chunks to be downloaded.
-        :param playbackBufferSizeInBlocks: How many blocks the queue should contain max.
         """
-        global _playbackBlockSize, _downloadChunkSize, _playbackBufferSizeInBlocks
+        global _playbackBlockSize, _downloadChunkSize
         if playbackBlockSize is not None:
             _playbackBlockSize = playbackBlockSize
         if downloadChunkSize is not None:
             _downloadChunkSize = downloadChunkSize
-        if playbackBufferSizeInBlocks is not None:
-            _playbackBufferSizeInBlocks = playbackBufferSizeInBlocks
 
     @staticmethod
     def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice:
@@ -78,19 +74,6 @@ class ElevenLabsVoice:
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
         self._labels = voiceData["labels"]
-
-        self._q = None
-        self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[sf.SoundFile] = None    #Needs to be created later.
-        self._bytesLock = threading.Lock()
-
-        self._events:dict[str, threading.Event] = {
-            "playbackFinishedEvent" : threading.Event(),
-            "headerReadyEvent" : threading.Event(),
-            "soundFileReadyEvent" : threading.Event(),
-            "downloadDoneEvent" : threading.Event(),
-            "blockDataAvailable" : threading.Event()
-        }
 
     def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> dict:
         """
@@ -158,7 +141,8 @@ class ElevenLabsVoice:
         return
 
     def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
-                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False):
+                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice in callback mode.
         It is always blocking, and can sometimes make the audio skip slightly, but the audio begins playing much more quickly.
@@ -168,237 +152,29 @@ class ElevenLabsVoice:
         	portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
         	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-
+        	onPlaybackStart: Function to call once the playback begins
+        	onPlaybackEnd: Function to call once the playback ends
         Returns:
         None
         """
-        if streamInBackground:
-            mainThread = threading.Thread(target=self._generate_and_stream_audio_inner, args=(prompt, portaudioDeviceID, stability, similarity_boost))
-            mainThread.start()
-        else:
-            self._generate_and_stream_audio_inner(prompt, portaudioDeviceID, stability, similarity_boost)
-
-        return
-
-
-    def _generate_and_stream_audio_inner(self, prompt:str, portaudioDeviceID:Optional[int] = None,
-                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None):
-        #TODO: After looking at this again, I'm pretty sure the queue is fucking useless.
-        # Buuuuuuuuuuuuuuuut I'm sick with covid and don't feel like refactoring this to remove it.
-        # I'll do it at some other time.
-
-
-        # Clean all the buffers and reset all events.
-        self._q = queue.Queue(maxsize=_playbackBufferSizeInBlocks)
-        self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
-        for eventName, event in self._events.items():
-            event.clear()
-
         payload = self._generate_payload(prompt, stability, similarity_boost)
         path = "/text-to-speech/" + self._voiceID + "/stream"
-        if portaudioDeviceID is None:
-            portaudioDeviceID = sd.default.device
 
-        downloadThread = threading.Thread(target=self._stream_downloader_function, args=(path, payload))
-        downloadThread.start()
+        streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
 
-        while True:
-            logging.debug("Waiting for header event...")
-            self._events["headerReadyEvent"].wait()
-            logging.debug("Header maybe ready?")
-            try:
-                with self._bytesLock:
-                    self._bytesSoundFile = sf.SoundFile(self._bytesFile)
-                    logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
-                    self._events["soundFileReadyEvent"].set()
-                    break
-            except sf.LibsndfileError:
-                self._bytesFile.seek(0)
-                dataBytes = self._bytesFile.read()
-                self._bytesFile.seek(0)
-                logging.debug("Error creating the soundfile with " + str(len(dataBytes)) + " bytes of data. Let's clear the headerReady event.")
-                self._events["headerReadyEvent"].clear()
-                self._events["soundFileReadyEvent"].set()
-
-        stream = sd.RawOutputStream(
-            samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
-            device=portaudioDeviceID, channels=self._bytesSoundFile.channels, dtype='float32',
-            callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
-        logging.debug("Starting playback...")
-        with stream:
-            timeout = _playbackBlockSize * _playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
-            # Since I can't find any way to get the buffer size from soundfile,
-            # we will just assume the first read operation gives back a complete chunk
-            # and use that to check later reads. This SHOULD be accurate. Hopefully.
-            # Maybe there's like a weird edge case or something, hopefully not.
-            likelyReadChunkSize = -1
-            while True:
-                data = self._insert_into_queue_from_download_thread()
-                if likelyReadChunkSize == -1:
-                    likelyReadChunkSize = len(data)
-                if len(data) >= likelyReadChunkSize:
-                    logging.debug("Putting " + str(len(data)) + " bytes in queue.")
-                    self._q.put(data, timeout=timeout)
-                else:
-                    logging.debug("Got back less data than expected, check if we're at the end...")
-                    with self._bytesLock:
-                        # This needs to use bytes rather than frames left, as sometimes the number of frames left is wrong.
-                        curPos = self._bytesFile.tell()
-                        endPos = self._bytesFile.seek(0, os.SEEK_END)
-                        self._bytesFile.seek(curPos)
-                        if endPos == curPos and self._events["downloadDoneEvent"].is_set():
-                            logging.debug("We're at the end.")
-                            if data != b"":
-                                logging.debug("Still some data left, writing it...")
-                                logging.debug("Putting " + str(len(data)) +
-                                              " bytes in queue.")
-                                self._q.put(data, timeout=timeout)
-                            break
-                        else:
-                            print("We're not at the end. Wait for more data.")
-            logging.debug("While loop done.")
-            self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
-            logging.debug(stream.active)
-        logging.debug("Stream done.")
-        return
-
-    def _stream_downloader_function(self, path, payload):
-        # This is the function running in the download thread.
         #testURL = "https://litter.catbox.moe/sk8cwj.mp3"
-        #streamedRequest = requests.get(testURL, stream=True)
-        streamedRequest = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
+        #streamedResponse = requests.get(testURL, stream=True)
 
-        streamedRequest.raise_for_status()
-        totalLength = 0
-        logging.debug("Starting iter...")
-        for chunk in streamedRequest.iter_content(chunk_size=_downloadChunkSize):
-            if self._events["headerReadyEvent"].is_set():
-                logging.debug("HeaderReady is set, waiting for the soundfile...")
-                self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
-                if not self._events["headerReadyEvent"].is_set():
-                    logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
-                    self._events["soundFileReadyEvent"].clear()
+        streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
-            totalLength += len(chunk)
-            if len(chunk) != _downloadChunkSize:
-                logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
+        if streamInBackground:
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse,))
+            mainThread.start()
+        else:
+            streamer.begin_streaming(streamedResponse)
 
-            # Write the new data then seek back to the initial position.
-            with self._bytesLock:
-                if not self._events["headerReadyEvent"].is_set():
-                    logging.debug("headerReady not set, setting it...")
-                    self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
-                    self._bytesFile.write(chunk)
-                    self._bytesFile.seek(0)  # Move the head back.
-                    self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
-                else:
-                    lastReadPos = self._bytesFile.tell()
-                    lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
-                    self._bytesFile.write(chunk)
-                    endPos = self._bytesFile.tell()
-                    self._bytesFile.seek(lastReadPos)
-                    logging.debug("Write head move: " + str(endPos - lastWritePos))
-                    if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
-                        logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
-                        self._events["blockDataAvailable"].set()
-
-        logging.debug("Download finished - " + str(totalLength) + ".")
-        self._events["downloadDoneEvent"].set()
-        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
         return
 
-    def _stream_playback_callback(self, outdata, frames, timeData, status):
-        assert frames == _playbackBlockSize
-        if status.output_underflow:
-            logging.error('Output underflow: increase blocksize?')
-            raise sd.CallbackAbort
-        assert not status
-
-        while True:
-            try:
-                readData = self._q.get_nowait()
-                if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
-                    logging.debug("An empty item got into the queue. Skip it.")
-                    continue
-                break
-            except queue.Empty as e:
-                if self._events["downloadDoneEvent"].is_set():
-                    logging.debug("Download (and playback) finished.")  # We're done.
-                    raise sd.CallbackStop
-                else:
-                    # This should NEVER happen, as the getdownloaddata function handles waiting for new data to come in. ABORT.
-                    logging.debug("Missing data but download isn't over. What the fuck?")
-                    raise sd.CallbackAbort
-
-        # Last read chunk was smaller than it should've been. It's either EOF or that stupid soundFile bug.
-        if 0 < len(readData) < len(outdata):
-            logging.debug("Data read smaller than it should've been.")
-            logging.debug("Read " + str(len(readData)) + " bytes but expected " + str(len(outdata)) + ", padding...")
-
-            # I still don't really understand why this happens - seems to be related to the soundfile bug.
-            # Padding it like this means there ends up being a small portion of silence during the playback.
-
-            outdata[:len(readData)] = readData
-            outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
-        elif len(readData) == 0:
-            logging.debug("Callback got no data from the queue. Checking if playback is over...")
-            with self._bytesLock:
-                oldPos = self._bytesFile.tell()
-                endPos = self._bytesFile.seek(0, os.SEEK_END)
-                if oldPos == endPos and self._events["downloadDoneEvent"].is_set():
-                    logging.debug("EOF reached and download over! Stopping callback...")
-                    raise sd.CallbackStop
-                else:
-                    logging.debug("...Read no data but the download isn't over, what the fuck? Panic. Just send silence.")
-                    outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
-        else:
-            outdata[:] = readData
-    #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
-    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype="float32"):
-        readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-        if len(readData) == 0:
-            logging.debug("No data read.")
-            logging.debug("Frame counter must be outdated, recreating soundfile...")
-            self._bytesFile.seek(0)
-            newSF = sf.SoundFile(self._bytesFile)
-            newSF.seek(self._bytesSoundFile.tell())
-            self._bytesSoundFile = newSF
-            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-            logging.debug("Now read " + str(len(readData)) + " bytes. I sure fucking hope that number isn't zero.")
-        return readData
-
-    def _insert_into_queue_from_download_thread(self) -> bytes:
-        self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
-        self._bytesLock.acquire()
-        try:
-            readData = self._soundFile_read_and_fix(_playbackBlockSize)
-        except AssertionError as e:
-            logging.debug("Exception in buffer_read (likely not enough data left), read what is available...")
-            try:
-                readData = self._soundFile_read_and_fix()
-            except AssertionError as en:
-                logging.debug("Mismatch in the number of frames read.")
-                logging.debug("This only seems to be an issue when it happens with files that have ID3v2 tags.")
-                logging.debug("Ignore it and return empty.")
-                readData = b""
-
-        logging.debug("Checking remaining bytes...")
-        currentPos = self._bytesFile.tell()
-        self._bytesFile.seek(0, os.SEEK_END)
-        endPos = self._bytesFile.tell()
-        logging.debug("Remaining file length: " + str(endPos - currentPos) + "\n")
-        self._bytesFile.seek(currentPos)
-        remainingBytes = endPos - currentPos
-
-        if remainingBytes < _playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
-            logging.debug("Marking no available blocks...")
-            self._events["blockDataAvailable"].clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
-
-        logging.debug("Read bytes: " + str(len(readData)) + "\n")
-
-        self._bytesLock.release()
-        return readData
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
         """
@@ -520,6 +296,248 @@ class ElevenLabsVoice:
     @property
     def voiceID(self):
         return self._voiceID
+
+
+
+class _AudioChunkStreamer:
+    def __init__(self,portaudioDeviceID:int = None,onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
+        self._q = queue.Queue()
+        self._bytesFile = io.BytesIO()
+        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
+        self._bytesLock = threading.Lock()
+        self._onPlaybackStart = onPlaybackStart
+        self._onPlaybackEnd = onPlaybackEnd
+
+        if portaudioDeviceID is None:
+            portaudioDeviceID = sd.default.device
+
+        self._deviceID = portaudioDeviceID
+
+        self._events: dict[str, threading.Event] = {
+            "playbackFinishedEvent": threading.Event(),
+            "headerReadyEvent": threading.Event(),
+            "soundFileReadyEvent": threading.Event(),
+            "downloadDoneEvent": threading.Event(),
+            "blockDataAvailable": threading.Event(),
+            "playbackStartFired": threading.Event()
+        }
+
+    def begin_streaming(self, streamedResponse:requests.Response):
+        #After re-relooking at this, I was stupid, the queue is actually necessary.
+
+        # Clean all the buffers and reset all events.
+        self._q = queue.Queue()
+        self._bytesFile = io.BytesIO()
+        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
+        for eventName, event in self._events.items():
+            event.clear()
+
+        downloadThread = threading.Thread(target=self._stream_downloader_function, args=(streamedResponse,))
+        downloadThread.start()
+
+        while True:
+            logging.debug("Waiting for header event...")
+            self._events["headerReadyEvent"].wait()
+            logging.debug("Header maybe ready?")
+            try:
+                with self._bytesLock:
+                    self._bytesSoundFile = sf.SoundFile(self._bytesFile)
+                    logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
+                    self._events["soundFileReadyEvent"].set()
+                    break
+            except sf.LibsndfileError:
+                self._bytesFile.seek(0)
+                dataBytes = self._bytesFile.read()
+                self._bytesFile.seek(0)
+                logging.debug("Error creating the soundfile with " + str(len(dataBytes)) + " bytes of data. Let's clear the headerReady event.")
+                self._events["headerReadyEvent"].clear()
+                self._events["soundFileReadyEvent"].set()
+
+        stream = sd.RawOutputStream(
+            samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
+            device=self._deviceID, channels=self._bytesSoundFile.channels, dtype='float32',
+            callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
+        logging.debug("Starting playback...")
+        with stream:
+            #This timeout is actually irrelevant now because I'm making the queue infinite size.
+            #timeout = _playbackBlockSize * _playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
+
+            # Since I can't find any way to get the buffer size from soundfile,
+            # we will just assume the first read operation gives back a complete chunk
+            # and use that to check later reads. This SHOULD be accurate. Hopefully.
+            # Maybe there's like a weird edge case or something, hopefully not.
+            likelyReadChunkSize = -1
+            while True:
+                data = self._insert_into_queue_from_download_thread()
+                if likelyReadChunkSize == -1:
+                    likelyReadChunkSize = len(data)
+                if len(data) >= likelyReadChunkSize:
+                    #logging.debug("Putting " + str(len(data)) + " bytes in queue.")
+                    self._q.put(data)
+                else:
+                    logging.debug("Got back less data than expected, check if we're at the end...")
+                    with self._bytesLock:
+                        # This needs to use bytes rather than frames left, as sometimes the number of frames left is wrong.
+                        curPos = self._bytesFile.tell()
+                        endPos = self._bytesFile.seek(0, os.SEEK_END)
+                        self._bytesFile.seek(curPos)
+                        if endPos == curPos and self._events["downloadDoneEvent"].is_set():
+                            logging.debug("We're at the end.")
+                            if data != b"":
+                                logging.debug("Still some data left, writing it...")
+                                #logging.debug("Putting " + str(len(data)) +
+                                #              " bytes in queue.")
+                                self._q.put(data)
+                            break
+                        else:
+                            print("We're not at the end. Wait for more data.")
+            logging.debug("While loop done.")
+            self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
+            self._onPlaybackEnd()
+            logging.debug(stream.active)
+        logging.debug("Stream done.")
+        return
+
+    def _stream_downloader_function(self, streamedResponse:requests.Response):
+        # This is the function running in the download thread.
+        streamedResponse.raise_for_status()
+        totalLength = 0
+        logging.debug("Starting iter...")
+        for chunk in streamedResponse.iter_content(chunk_size=_downloadChunkSize):
+            if self._events["headerReadyEvent"].is_set():
+                logging.debug("HeaderReady is set, waiting for the soundfile...")
+                self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
+                if not self._events["headerReadyEvent"].is_set():
+                    logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
+                    self._events["soundFileReadyEvent"].clear()
+
+            totalLength += len(chunk)
+            if len(chunk) != _downloadChunkSize:
+                logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
+
+            # Write the new data then seek back to the initial position.
+            with self._bytesLock:
+                if not self._events["headerReadyEvent"].is_set():
+                    logging.debug("headerReady not set, setting it...")
+                    self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
+                    self._bytesFile.write(chunk)
+                    self._bytesFile.seek(0)  # Move the head back.
+                    self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
+                else:
+                    lastReadPos = self._bytesFile.tell()
+                    lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
+                    self._bytesFile.write(chunk)
+                    endPos = self._bytesFile.tell()
+                    self._bytesFile.seek(lastReadPos)
+                    logging.debug("Write head move: " + str(endPos - lastWritePos))
+                    if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
+                        logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
+                        self._events["blockDataAvailable"].set()
+
+        logging.debug("Download finished - " + str(totalLength) + ".")
+        self._events["downloadDoneEvent"].set()
+        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
+        return
+
+    def _stream_playback_callback(self, outdata, frames, timeData, status):
+        assert frames == _playbackBlockSize
+        if status.output_underflow:
+            logging.error('Output underflow: increase blocksize?')
+            #raise sd.CallbackAbort
+        #assert not status
+
+        #Underflow can happen when two streams are started at once and it doesn't seem to do anything bad so I'm just ignoring it.
+
+        while True:
+            try:
+                readData = self._q.get_nowait()
+                if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
+                    logging.debug("An empty item got into the queue. Skip it.")
+                    continue
+                break
+            except queue.Empty as e:
+                if self._events["downloadDoneEvent"].is_set():
+                    logging.debug("Download (and playback) finished.")  # We're done.
+                    raise sd.CallbackStop
+                else:
+                    # This should NEVER happen, as the getdownloaddata function handles waiting for new data to come in. ABORT.
+                    logging.debug("Missing data but download isn't over. What the fuck?")
+                    raise sd.CallbackAbort
+        #We've read an item from the queue.
+
+        if not self._events["playbackStartFired"].is_set(): #Ensure the callback only fires once.
+            self._events["playbackStartFired"].set()
+            print("Firing onPlaybackStart...")
+            self._onPlaybackStart()
+
+        # Last read chunk was smaller than it should've been. It's either EOF or that stupid soundFile bug.
+        if 0 < len(readData) < len(outdata):
+            logging.debug("Data read smaller than it should've been.")
+            logging.debug("Read " + str(len(readData)) + " bytes but expected " + str(len(outdata)) + ", padding...")
+
+            # I still don't really understand why this happens - seems to be related to the soundfile bug.
+            # Padding it like this means there ends up being a small portion of silence during the playback.
+
+            outdata[:len(readData)] = readData
+            outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
+        elif len(readData) == 0:
+            logging.debug("Callback got no data from the queue. Checking if playback is over...")
+            with self._bytesLock:
+                oldPos = self._bytesFile.tell()
+                endPos = self._bytesFile.seek(0, os.SEEK_END)
+                if oldPos == endPos and self._events["downloadDoneEvent"].is_set():
+                    logging.debug("EOF reached and download over! Stopping callback...")
+                    raise sd.CallbackStop
+                else:
+                    logging.debug("...Read no data but the download isn't over, what the fuck? Panic. Just send silence.")
+                    outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
+        else:
+            outdata[:] = readData
+    #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
+    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype="float32"):
+        readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+        if len(readData) == 0:
+            logging.debug("No data read.")
+            logging.debug("Frame counter must be outdated, recreating soundfile...")
+            self._bytesFile.seek(0)
+            newSF = sf.SoundFile(self._bytesFile)
+            newSF.seek(self._bytesSoundFile.tell())
+            self._bytesSoundFile = newSF
+            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+            logging.debug("Now read " + str(len(readData)) + " bytes. I sure fucking hope that number isn't zero.")
+        return readData
+
+    def _insert_into_queue_from_download_thread(self) -> bytes:
+        self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
+        self._bytesLock.acquire()
+        try:
+            readData = self._soundFile_read_and_fix(_playbackBlockSize)
+        except AssertionError as e:
+            logging.debug("Exception in buffer_read (likely not enough data left), read what is available...")
+            try:
+                readData = self._soundFile_read_and_fix()
+            except AssertionError as en:
+                logging.debug("Mismatch in the number of frames read.")
+                logging.debug("This only seems to be an issue when it happens with files that have ID3v2 tags.")
+                logging.debug("Ignore it and return empty.")
+                readData = b""
+
+        #logging.debug("Checking remaining bytes...")
+        currentPos = self._bytesFile.tell()
+        self._bytesFile.seek(0, os.SEEK_END)
+        endPos = self._bytesFile.tell()
+        #logging.debug("Remaining file length: " + str(endPos - currentPos) + "\n")
+        self._bytesFile.seek(currentPos)
+        remainingBytes = endPos - currentPos
+
+        if remainingBytes < _playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
+            logging.debug("Marking no available blocks...")
+            self._events["blockDataAvailable"].clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
+
+        logging.debug("Read bytes: " + str(len(readData)) + "\n")
+
+        self._bytesLock.release()
+        return readData
 
 
 class ElevenLabsGeneratedVoice(ElevenLabsVoice):

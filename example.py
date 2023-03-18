@@ -76,6 +76,14 @@ def main():
         #Add a new sample to the voice:
         newVoice.add_samples_by_path([samplePath2])
 
+        firstPlaybackEnded = threading.Event()
+        secondPlaybackEnded = threading.Event()
+        print("Doing two STREAMED PLAYBACKS back to back...")
+        newVoice.generate_and_stream_audio("Test.", streamInBackground=True, onPlaybackEnd=firstPlaybackEnded.set)
+        newVoice.generate_and_stream_audio("Test.",streamInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set)
+
+        print("Waiting for both playbacks to end...")
+        secondPlaybackEnded.wait()
 
 
         #Remove the first sample, playing it back before deleting it:
