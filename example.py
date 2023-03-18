@@ -76,14 +76,6 @@ def main():
         #Add a new sample to the voice:
         newVoice.add_samples_by_path([samplePath2])
 
-        firstPlaybackEnded = threading.Event()
-        secondPlaybackEnded = threading.Event()
-        print("Doing two STREAMED PLAYBACKS back to back...")
-        newVoice.generate_and_stream_audio("Test.", streamInBackground=True, onPlaybackEnd=firstPlaybackEnded.set)
-        newVoice.generate_and_stream_audio("Test.",streamInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set)
-
-        print("Waiting for both playbacks to end...")
-        secondPlaybackEnded.wait()
 
 
         #Remove the first sample, playing it back before deleting it:
@@ -155,7 +147,15 @@ def main():
         premadeVoice.generate_and_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)
 
         #Playback with streaming (without waiting for the whole file to be downloaded, so with a faster response time)
-        premadeVoice.generate_and_stream_audio("Test.", 6, streamInBackground=True)
+        #Additionally, the second one will begin downloading while the first one is still playing, but will only start playing once the first is done.
+        firstPlaybackEnded = threading.Event()
+        secondPlaybackEnded = threading.Event()
+        print("Doing two STREAMED playbacks back to back...")
+        premadeVoice.generate_and_stream_audio("Test One.", streamInBackground=True, onPlaybackEnd=firstPlaybackEnded.set)
+        premadeVoice.generate_and_stream_audio("Test Two.", streamInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set)
+
+        print("Waiting for both playbacks to end...")
+        secondPlaybackEnded.wait()
 
         #Generate a sample and save it to disk, then play it back.
         mp3Data = premadeVoice.generate_audio_bytes("Test.")
