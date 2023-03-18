@@ -136,7 +136,9 @@ class ElevenLabsVoice:
 
         return response.content
 
-    def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None, stability:Optional[float]=None, similarity_boost:Optional[float]=None):
+    def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
+                                stability:Optional[float]=None, similarity_boost:Optional[float]=None,
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -146,12 +148,13 @@ class ElevenLabsVoice:
         	portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
         	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-
+        	onPlaybackStart: Function to call once the playback begins
+        	onPlaybackEnd: Function to call once the playback ends
         Returns:
         The data from the response (such as the number of tokens used).
         """
         audioData = self.generate_audio_bytes(prompt, stability, similarity_boost)
-        play_audio_bytes(audioData, playInBackground, portaudioDeviceID)
+        play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return
 
     def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
@@ -180,6 +183,11 @@ class ElevenLabsVoice:
 
     def _generate_and_stream_audio_inner(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None):
+        #TODO: After looking at this again, I'm pretty sure the queue is fucking useless.
+        # Buuuuuuuuuuuuuuuut I'm sick with covid and don't feel like refactoring this to remove it.
+        # I'll do it at some other time.
+
+
         # Clean all the buffers and reset all events.
         self._q = queue.Queue(maxsize=_playbackBufferSizeInBlocks)
         self._bytesFile = io.BytesIO()
@@ -391,19 +399,21 @@ class ElevenLabsVoice:
 
         self._bytesLock.release()
         return readData
-    def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None) -> None:
+    def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
         """
         Plays the preview audio.
 
         Args:
             playInBackground: A bool indicating whether to play the audio in the background.
             portaudioDeviceID: Optional int indicating the device ID to use for audio playback.
-
+        	onPlaybackStart: Function to call once the playback begins
+        	onPlaybackEnd: Function to call once the playback ends
         Returns:
             None
         """
         # This will error out if the preview hasn't been generated
-        play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID)
+        play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return
 
     def get_preview_bytes(self) -> bytes:

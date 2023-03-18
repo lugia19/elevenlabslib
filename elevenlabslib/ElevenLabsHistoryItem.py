@@ -26,8 +26,9 @@ class ElevenLabsHistoryItem:
         self._characterCountChangeTo = data["character_count_change_to"]
         self._contentType = data["content_type"]
         self._state = data["state"]
+        self._audioData = None
 
-    def get_audio_bytes(self):
+    def get_audio_bytes(self) -> bytes:
         """
         Retrieves the audio bytes associated with the history item.
         IMPORTANT: If you're looking to download multiple history items, use the user function instead.
@@ -36,18 +37,23 @@ class ElevenLabsHistoryItem:
         Returns:
             bytes: a bytes object containing the audio in mp3 format.
         """
-        response = _api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
-        return response.content
+        if self._audioData is None:
+            response = _api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
+            self._audioData = response.content
+        return self._audioData
 
-    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
         """
         Plays the audio associated with the history item.
 
         Args:
             playInBackground: a boolean indicating whether the audio should be played in the background
             portaudioDeviceID: an optional integer representing the portaudio device ID to use
+            onPlaybackStart: Function to call once the playback begins
+            onPlaybackEnd: Function to call once the playback ends
         """
-        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID)
+        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return
 
     def delete(self):

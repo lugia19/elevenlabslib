@@ -85,6 +85,20 @@ def main():
                 print("Found the sample we want to delete.")
                 print(sample.fileName)
                 sample.play_audio(playInBackground=False)
+                print("Playback done (blocking)")
+
+                firstPlaybackEnded = threading.Event()
+                secondPlaybackEnded = threading.Event()
+                #These two are both going to being to download data at the same time (not really because in samples and historyItems the bytes are cached, but still)
+                #but will only play one at a time because of the events.
+
+                #This is just a simple example of what can be done with the callbacks.
+
+                print("Doing two playbacks back to back...")
+                sample.play_audio(playInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set)
+                sample.play_audio(playInBackground=True, onPlaybackEnd=firstPlaybackEnded.set)
+                print("Waiting for both playbacks to end...")
+                secondPlaybackEnded.wait()
                 sample.delete()
 
         #Change the voice name:
@@ -107,7 +121,7 @@ def main():
             # Generate an output:
             newVoice.generate_and_play_audio("Test.",playInBackground=False)
             # Generate an output overwriting the stability and/or similarity setting for this generation:
-            newVoice.generate_and_play_audio("Test.", stability=0.3,playInBackground=False)
+            newVoice.generate_and_play_audio("Test.", stability=0.3,playInBackground=True)
         except requests.exceptions.RequestException:
             print("Couldn't generate output, likely out of tokens.")
 

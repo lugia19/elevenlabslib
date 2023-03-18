@@ -11,26 +11,32 @@ class ElevenLabsSample:
         self._mimeType = sampleData["mime_type"]
         self._size = sampleData["size_bytes"]
         self._hash = sampleData["hash"]
+        self._audioData = None      #This is used to cache the audio data since it never changes.
 
-    def get_audio_bytes(self):
+    def get_audio_bytes(self) -> bytes:
         """
         Retrieves the audio bytes associated with the sample.
 
         Returns:
             bytes: a bytes object containing the audio in mp3 format.
         """
-        response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
-        return response.content
+        if self._audioData is None:
+            response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
+            self._audioData = response.content
+        return self._audioData
 
-    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None) -> None:
+    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
         """
-        Plays the audio associated with the sample.
+        Downloads and plays the audio associated with the sample.
 
         Args:
             playInBackground: a boolean indicating whether the audio should be played in the background
             portaudioDeviceID: an optional integer representing the portaudio device ID to use
+            onPlaybackStart: Function to call once the playback begins
+            onPlaybackEnd: Function to call once the playback ends
         """
-        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID)
+        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return
 
     def delete(self):
