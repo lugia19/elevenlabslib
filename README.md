@@ -1,4 +1,8 @@
 # elevenlabslib
+![PyPI - Downloads](https://img.shields.io/pypi/dm/elevenlabslib?color=%23009FFFFF&style=for-the-badge)
+![PyPI](https://img.shields.io/pypi/v/elevenlabslib?color=%23FE6137&style=for-the-badge)
+![GitHub last commit](https://img.shields.io/github/last-commit/lugia19/elevenlabslib?style=for-the-badge)
+
 Python wrapper for the full elevenlabs API.
 
 # Installation
