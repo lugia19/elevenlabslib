@@ -145,7 +145,9 @@ class ElevenLabsVoice:
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice in callback mode.
-        It is always blocking, and can sometimes make the audio skip slightly, but the audio begins playing much more quickly.
+        Sometimes make the audio skip slightly, but the audio begins playing more quickly.
+        I've measured it and on average it takes around 0.5-ish seconds less than the normal generate function.
+        It may be less depending on your subscription level.
         Parameters:
             streamInBackground (bool): Whether or not to play the audio (and let the download complete) in a separate thread.
         	prompt (str): The text prompt to generate audio from.

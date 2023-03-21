@@ -96,6 +96,26 @@ class ElevenLabsUser:
         subData = self._get_subscription_data()
         return subData["next_invoice"]
 
+    def get_concurrency(self) -> int:
+        """
+        Gets the concurrency value.
+
+        Returns:
+            int: The concurrency amount.
+        """
+        subData = self._get_subscription_data()
+        return subData["concurrency"]
+
+    def get_priority(self) -> int:
+        """
+        Gets the user's priority level. This is based on your subscription, and determines the amount of latency during periods of heavy load.
+
+        Returns:
+            int: The priority level.
+        """
+        subData = self._get_subscription_data()
+        return subData["priority"]
+
     def get_available_voices(self) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
         """
         Gets a list of all available voices.
