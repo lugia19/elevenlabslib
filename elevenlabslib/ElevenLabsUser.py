@@ -116,12 +116,13 @@ class ElevenLabsUser:
         subData = self._get_subscription_data()
         return subData["priority"]
 
-    def get_available_voices(self) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
+    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice]:
         """
-        Gets a list of all available voices.
+        Gets a list of all voices registered to this account.
+        Some of these may be currently unusable.
 
         Returns:
-            list[ElevenLabsVoice]: A list of available voices.
+            list[ElevenLabsVoice]: A list containing all the voices.
         """
         response = _api_get("/voices", headers=self._headers)
         availableVoices: list[ElevenLabsVoice] = list()
@@ -129,6 +130,22 @@ class ElevenLabsUser:
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
             availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
+        return availableVoices
+
+    def get_available_voices(self) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
+        """
+        Gets a list of voices this account can currently use.
+
+        Returns:
+            list[ElevenLabsVoice]: A list of currently usable voices.
+        """
+        allVoices = self.get_all_voices()
+        availableVoices = list()
+        canUseClonedVoices = self.get_voice_clone_available()
+        for voice in allVoices:
+            if voice.category == "cloned" and not canUseClonedVoices:
+                continue
+            availableVoices.append(voice)
         return availableVoices
 
     def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice:
