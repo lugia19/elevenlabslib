@@ -48,13 +48,18 @@ def _api_json(path, headers, jsonData) -> requests.Response:
 def _api_multipart(path, headers, data=None, filesData=None):
     return _api_call("multipart", path, headers, data, filesData)
 
-def _pretty_print_POST(req):
+def _pretty_print_POST(res:requests.Response):
+    req = res.request
+    logging.error(f"RESPONSE DATA: {res.text}")
     logging.error('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
         '-----------START-----------',
         req.method + ' ' + req.url,
         '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
         req.body,
     ))
+
+
+
 
 def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
