@@ -16,6 +16,7 @@ dependencies=[
     "requests",
     "typing",
     "sounddevice",
+    "numpy",
     "soundfile"
 ]
 classifiers = [
