@@ -10,7 +10,7 @@ from elevenlabslib import *
 def main():
     if os.path.exists("config.json"):
         configData = json.load(open("config.json","r"))
-        apiKey = configData["api_key"]
+        apiKey = configData["api_key_2"]
         apiKey2 = configData["api_key_2"]
         samplePath1 = configData["sample_path_1"]
         samplePath2 = configData["sample_path_2"]
@@ -28,7 +28,7 @@ def main():
 
     #Delete voices if they already exist
     try:
-        user.get_voices_by_name("TESTNAME")[0].delete_voice()
+        user.get_voices_by_name("ClonedVoiceTest")[0].delete_voice()
         print("Voice found and deleted.")
     except IndexError:
         print("Voice not found, no need to delete it.")
@@ -39,6 +39,54 @@ def main():
     except IndexError:
         print("Voice not found, no need to delete it.")
 
+    #Let's generate a new voice using voice design
+    try:
+        temporaryVoiceID, generatedAudio = user.design_voice(gender="female", accent="american", age="young", accent_strength=1.0)
+    except requests.exceptions.RequestException:
+        temporaryVoiceID = None
+        generatedAudio = None
+        print("Couldn't design voice, likely out of tokens.")
+    if temporaryVoiceID is not None:
+        play_audio_bytes(generatedAudio, playInBackground=False)
+
+        #We have the audio sample for the new voice and the TEMPORARY voice ID. The voice is not yet saved to our account.
+        #Let's play back the audio sample and then save the voice to the account.
+        newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, "DesignedVoiceTest")
+
+        # Change the voice name:
+        newGeneratedVoice.edit_voice(newName="newName")
+
+        # Showcase how despite the name being changed, the initialName DOES NOT.
+        print("newGeneratedVoice.get_name(): " + newGeneratedVoice.get_name())
+        print("newGeneratedVoice.initialName: " + newGeneratedVoice.initialName)
+
+        # Get the current voice settings:
+        currentSettings = newGeneratedVoice.get_settings()
+        stability: float = currentSettings["stability"]
+        similarityBoost: float = currentSettings["similarity_boost"]
+
+        # Lower stability and increase similarity, then edit the voice settings:
+        stability = min(1.0, stability - 0.1)
+        similarityBoost = min(1.0, similarityBoost + 0.1)
+        newGeneratedVoice.edit_settings(stability, similarityBoost)
+        try:
+            # Generate an output:
+            newGeneratedVoice.generate_and_play_audio("Test.", playInBackground=False)
+            # Generate an output overwriting the stability and/or similarity setting for this generation:
+            newGeneratedVoice.generate_and_play_audio("Test.", stability=0.3, playInBackground=True)
+        except requests.exceptions.RequestException:
+            print("Couldn't generate output, likely out of tokens.")
+
+        # Save the voice's ID:
+        storedVoiceID = newGeneratedVoice.voiceID
+
+        #Delete the voice:
+        newGeneratedVoice.delete_voice()
+        # Warning: The object still persists but its voiceID is now empty, so none of the methods will work.
+
+        # Check that the voice was deleted:
+        for voice in user.get_available_voices():
+            assert (voice.voiceID != storedVoiceID)
 
 
     if user.get_voice_clone_available():
@@ -49,19 +97,19 @@ def main():
         firstSampleFileName = samplePath1[samplePath1.rfind("\\") + 1:]
 
         #Create the new voice by uploading the sample as bytes
-        newVoice = user.clone_voice_bytes("TESTNAME", {firstSampleFileName: firstSampleBytes})
+        newClonedVoice = user.clone_voice_bytes("ClonedVoiceTest", {firstSampleFileName: firstSampleBytes})
         #This can also be done by using the path:
-        #newVoice = user.create_voice_by_path("TESTNAME", samplePath1)
+        #newClonedVoice = user.create_voice_by_path("ClonedVoiceTest", samplePath1)
 
         #Get new voice data
         print("New voice:")
-        print(newVoice.get_name())
-        print(newVoice.voiceID)
-        print(newVoice.get_samples()[0].fileName)
+        print(newClonedVoice.get_name())
+        print(newClonedVoice.voiceID)
+        print(newClonedVoice.get_samples()[0].fileName)
 
         #Play back the automatically generated preview:
         try:
-            newVoice.play_preview(playInBackground=False)
+            newClonedVoice.play_preview(playInBackground=False)
         except RuntimeError:
             print("Error getting the preview. It likely hasn't been generated yet.")
 
@@ -74,12 +122,12 @@ def main():
                 print(voice.initialName)
 
         #Add a new sample to the voice:
-        newVoice.add_samples_by_path([samplePath2])
+        newClonedVoice.add_samples_by_path([samplePath2])
 
 
 
         #Remove the first sample, playing it back before deleting it:
-        for sample in newVoice.get_samples():
+        for sample in newClonedVoice.get_samples():
             #NOTE: You CANNOT find a sample by simply checking if the bytes match. There is some re-encoding (or tag stripping) going on server-side.
             if sample.fileName == firstSampleFileName:
                 print("Found the sample we want to delete.")
@@ -100,44 +148,9 @@ def main():
                 print("Waiting for both playbacks to end...")
                 secondPlaybackEnded.wait()
                 sample.delete()
+        #Delete the new cloned voice:
+        newClonedVoice.delete_voice()
 
-        #Change the voice name:
-        newVoice.edit_voice(newName="newName")
-
-        #Showcase how despite the name being changed, the initialName DOES NOT.
-        print("newVoice.get_name(): " + newVoice.get_name())
-        print("newVoice.initialName: " + newVoice.initialName)
-
-        #Get the current voice settings:
-        currentSettings = newVoice.get_settings()
-        stability:float = currentSettings["stability"]
-        similarityBoost:float = currentSettings["similarity_boost"]
-
-        #Lower stability and increase similarity, then edit the voice settings:
-        stability = min(1.0, stability-0.1)
-        similarityBoost = min(1.0, similarityBoost + 0.1)
-        newVoice.edit_settings(stability, similarityBoost)
-        try:
-            # Generate an output:
-            newVoice.generate_and_play_audio("Test.",playInBackground=False)
-            # Generate an output overwriting the stability and/or similarity setting for this generation:
-            newVoice.generate_and_play_audio("Test.", stability=0.3,playInBackground=True)
-        except requests.exceptions.RequestException:
-            print("Couldn't generate output, likely out of tokens.")
-
-        #Save the voice's current name:
-        newVoiceName = newVoice.get_name()
-
-        #Delete the new voice:
-        newVoice.delete_voice()
-
-        #Warning: The object still persists but its voiceID is now empty, so none of the methods will work.
-
-        #Check that the voice was deleted:
-        for voice in user.get_available_voices():
-            voiceName = voice.initialName
-            print(voiceName)
-            assert(voiceName != newVoiceName)
 
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).

@@ -2,10 +2,10 @@ from __future__ import annotations
 import io
 import zipfile
 
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, BinaryIO, Union
 
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
-from elevenlabslib.ElevenLabsVoice import ElevenLabsGeneratedVoice
+from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
 
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class ElevenLabsUser:
         subData = self._get_subscription_data()
         return subData["priority"]
 
-    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice]:
+    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
         """
         Gets a list of all voices registered to this account.
         Some of these may be currently unusable.
@@ -132,7 +132,7 @@ class ElevenLabsUser:
             availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
         return availableVoices
 
-    def get_available_voices(self) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
+    def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
         """
         Gets a list of voices this account can currently use.
 
@@ -148,7 +148,7 @@ class ElevenLabsUser:
             availableVoices.append(voice)
         return availableVoices
 
-    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice:
+    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
         """
         Gets a specific voice by ID.
 
@@ -156,13 +156,13 @@ class ElevenLabsUser:
             voiceID (str): The ID of the voice to get.
 
         Returns:
-            ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice: The requested voice.
+            ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice: The requested voice.
         """
         response = _api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice.voiceFactory(voiceData, self)
-    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]:
+    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
         """
         Gets a list of voices with the given name.
 
@@ -170,7 +170,7 @@ class ElevenLabsUser:
             voiceName (str): The name of the voices to get.
 
         Returns:
-            list[ElevenLabsVoice|ElevenLabsGeneratedVoice|ElevenLabsClonedVoice]: A list of matching voices.
+            list[ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice]: A list of matching voices.
         """
         allVoices = self.get_available_voices()
         matchingVoices = list()
@@ -254,6 +254,54 @@ class ElevenLabsUser:
 
         return downloadedHistoryItems
 
+    def design_voice(self, gender:str, accent:str, age:str, accent_strength:float, sampleText:str = "First we thought the PC was a calculator. Then we found out how to turn numbers into letters and we thought it was a typewriter.")\
+            -> (str,bytes):
+        """
+            Calls the API endpoint that randomly generates a voice based on the given parameters.
+            To actually SAVE the generated voice to your account, you must then call save_designed_voice.
+            Args:
+                gender (str): The gender.
+                accent (str): The accent.
+                age (str): The age.
+                accent_strength (float): How strong the accent should be, between 0.3 and 2.
+                sampleText (str): The text that will be used to randomly generate the new voice. Must be at least 100 characters long.
+            Returns:
+                (str, bytes): A tuple containing the new voiceID and the bytes of the generated audio.
+        """
+        if not (0.3 <= accent_strength <= 2):
+            raise ValueError("accent_strength must be within 0.3 and 2!")
+
+        payload = {
+            "text": sampleText,
+            "gender": gender,
+            "accent": accent,
+            "age": age,
+            "accent_strength": accent_strength
+        }
+        response = _api_json("/voice-generation/generate-voice", headers=self._headers, jsonData=payload)
+
+        return response.headers["generated_voice_id"], response.content
+
+    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple:str, bytes], voiceName:str) -> ElevenLabsDesignedVoice:
+        """
+            Saves a voice generated via design_voice to your account, with the given name.
+            Args:
+                temporaryVoiceID (str OR tuple(str,bytes)): The temporary voiceID of the generated voice. It also supports directly passing the tuple from design_voice.
+                voiceName (str): The name you would like to give to the new voice.
+            Returns:
+                ElevenLabsDesignedVoice: The newly created voice
+        """
+        if temporaryVoiceID is tuple:
+            temporaryVoiceID = temporaryVoiceID[0]
+        payload = {
+            "voice_name" : voiceName,
+            "generated_voice_id" : temporaryVoiceID
+        }
+        response = _api_json("/voice-generation/create-voice", headers=self._headers, jsonData=payload)
+
+        return self.get_voice_by_ID(response.json()["voice_id"])
+
+
     def clone_voice_by_path(self, name:str, samples: list[str]) -> ElevenLabsClonedVoice:
         """
             Create a new ElevenLabsGeneratedVoice object by providing the voice name and a list of sample file paths.
@@ -264,7 +312,7 @@ class ElevenLabsUser:
 
             Returns:
                 ElevenLabsVoice: Newly created ElevenLabsVoice object.
-            """
+        """
         sampleBytes = {}
         for samplePath in samples:
             if "\\" in samplePath:

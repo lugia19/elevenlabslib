@@ -26,7 +26,7 @@ _downloadChunkSize = 4096
 class ElevenLabsVoice:
     """
     Represents a voice in the ElevenLabs API.
-    It's the parent class for all voices, and used directly for the premade ones.
+    It's the parent class for all voices, and used directly for the premade and designed ones.
     """
     @staticmethod
     def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
@@ -43,7 +43,7 @@ class ElevenLabsVoice:
             _downloadChunkSize = downloadChunkSize
 
     @staticmethod
-    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsGeneratedVoice | ElevenLabsClonedVoice:
+    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
         """
         Initializes a new instance of either ElevenLabsVoice or ElevenLabsGeneratedVoice or ElevenLabsClonedVoice depending on the category.
         Args:
@@ -55,7 +55,7 @@ class ElevenLabsVoice:
         elif voiceData["category"] == "cloned":
             return ElevenLabsClonedVoice(voiceData, linkedUser)
         elif voiceData["category"] == "generated":
-            return ElevenLabsGeneratedVoice(voiceData, linkedUser)
+            return ElevenLabsDesignedVoice(voiceData, linkedUser)
         else:
             raise ValueError(voiceData["category"] + " is not a valid voice category!")
 
@@ -542,7 +542,7 @@ class _AudioChunkStreamer:
         return readData
 
 
-class ElevenLabsGeneratedVoice(ElevenLabsVoice):
+class ElevenLabsDesignedVoice(ElevenLabsVoice):
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
