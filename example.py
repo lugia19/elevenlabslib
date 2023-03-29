@@ -10,7 +10,7 @@ from elevenlabslib import *
 def main():
     if os.path.exists("config.json"):
         configData = json.load(open("config.json","r"))
-        apiKey = configData["api_key_2"]
+        apiKey = configData["api_key"]
         apiKey2 = configData["api_key_2"]
         samplePath1 = configData["sample_path_1"]
         samplePath2 = configData["sample_path_2"]
