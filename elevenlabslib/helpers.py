@@ -33,7 +33,7 @@ def _api_call(requestType, path, headers, jsonData=None, filesData=None) -> requ
         response.raise_for_status()
         return response
     except requests.exceptions.RequestException as e:
-        _pretty_print_POST(response.request)
+        _pretty_print_POST(response)
         raise e
 
 def _api_get(path, headers) -> requests.Response:
