@@ -99,7 +99,7 @@ def main():
         #Create the new voice by uploading the sample as bytes
         newClonedVoice = user.clone_voice_bytes("ClonedVoiceTest", {firstSampleFileName: firstSampleBytes})
         #This can also be done by using the path:
-        #newClonedVoice = user.create_voice_by_path("ClonedVoiceTest", samplePath1)
+        #newClonedVoice = user.clone_voice_by_path("ClonedVoiceTest", samplePath1)
 
         #Get new voice data
         print("New voice:")
