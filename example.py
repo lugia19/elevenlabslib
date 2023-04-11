@@ -20,8 +20,8 @@ def main():
         samplePath1 = ""
         samplePath2 = ""
 
-    #Enable logging:
-    logging.basicConfig(level=logging.DEBUG)
+    #Uncomment this to enable logging:
+    #logging.basicConfig(level=logging.DEBUG)
 
     #Create the user object
     user = ElevenLabsUser(apiKey)
@@ -53,17 +53,22 @@ def main():
         #Let's play back the audio sample and then save the voice to the account.
         newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, "DesignedVoiceTest")
 
-        # Change the voice name:
-        newGeneratedVoice.edit_voice(newName="newName")
+        # Change the voice name and description:
+        newGeneratedVoice.edit_voice(newName="newName", description="This is a test voice from example.py")
 
         # Showcase how despite the name being changed, the initialName DOES NOT.
         print("newGeneratedVoice.get_name(): " + newGeneratedVoice.get_name())
         print("newGeneratedVoice.initialName: " + newGeneratedVoice.initialName)
-
+        print("newGeneratedVoice.get_description(): " + newGeneratedVoice.get_description())
         # Get the current voice settings:
         currentSettings = newGeneratedVoice.get_settings()
         stability: float = currentSettings["stability"]
         similarityBoost: float = currentSettings["similarity_boost"]
+
+        # Show the raw voice metadata:
+        print("Raw voice metadata:")
+        print(newGeneratedVoice.get_info())
+
 
         # Lower stability and increase similarity, then edit the voice settings:
         stability = min(1.0, stability - 0.1)
@@ -154,7 +159,7 @@ def main():
 
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
-    premadeVoice = user.get_voices_by_name("Rachel")[0]
+    premadeVoice:ElevenLabsVoice = user.get_voices_by_name("Rachel")[0]
     try:
         #Playback in normal mode, waiting for the whole file to be downloaded before playing it back.
         premadeVoice.generate_and_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)

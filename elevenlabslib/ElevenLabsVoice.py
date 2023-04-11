@@ -73,7 +73,6 @@ class ElevenLabsVoice:
         self.initialName = voiceData["name"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
-        self._labels = voiceData["labels"]
 
     def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> dict:
         """
@@ -220,7 +219,16 @@ class ElevenLabsVoice:
         # We don't store the name OR the settings, as they can be changed externally.
         response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
         return response.json()
+    def get_info(self) -> dict:
+        """
+        Get the raw metadata for the voice.
+        Returns:
+            dict: A dict containing all the metadata
+        """
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        return response.json()
 
+    #I've settled on only providing dedicated getters for the (imo) most common fields, name, description and labels. For everything else, there's the get_info method.
     def get_name(self) -> str:
         """
         Get the name of the current voice.
@@ -228,8 +236,16 @@ class ElevenLabsVoice:
         Returns:
             str: The name of the voice.
         """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
-        return response.json()["name"]
+        return self.get_info()["name"]
+
+    def get_description(self) -> str|None:
+        """
+        Get the description.
+
+        Returns:
+            str: The description for the voice.
+        """
+        return self.get_info()["description"]
 
     def get_preview_url(self) -> str|None:
         """
@@ -238,8 +254,7 @@ class ElevenLabsVoice:
         Returns:
             str|None: The preview URL of the voice, or None if it doesn't exist.
         """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
-        return response.json()["preview_url"]
+        return self.get_info()["preview_url"]
 
     def edit_settings(self, stability:float=None, similarity_boost:float=None):
         """
@@ -265,10 +280,6 @@ class ElevenLabsVoice:
     @property
     def category(self):
         return self._category
-    @property
-    def labels(self):
-        return self._labels
-
     # Since the same voice can be available for multiple users, we allow the user to change which API key is used.
     @property
     def linkedUser(self):
@@ -546,22 +557,29 @@ class ElevenLabsDesignedVoice(ElevenLabsVoice):
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
-    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None):
+    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None, description:str = None):
         """
         Edit the name/labels of the voice.
 
         Args:
-            newName (str): The new name for the voice.
-            newLabels (str): The new labels for the voice.
+            newName (str): The new name
+            newLabels (str): The new labels
+            description (str): The new description
         """
-        if newName is None:
-            newName = self.get_name()
-        payload = {"name": newName}
-
+        currentInfo = self.get_info()
+        payload = {
+            "name": currentInfo["name"],
+            "labels": currentInfo["labels"],
+            "description": currentInfo["description"]
+        }
+        if newName is not None:
+            payload["name"] = newName
         if newLabels is not None:
             if len(newLabels.keys()) > 5:
                 raise ValueError("Too many labels! The maximum amount is 5.")
             payload["labels"] = newLabels
+        if description is not None:
+            payload["description"] = description
         _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
     def delete_voice(self):
         """
@@ -580,37 +598,17 @@ class ElevenLabsDesignedVoice(ElevenLabsVoice):
         self._voiceID = ""
 
 
-class ElevenLabsClonedVoice(ElevenLabsVoice):
+class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
-
     def get_samples(self) -> list[ElevenLabsSample]:
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
         outputList = list()
-        samplesData = response.json()["samples"]
+        samplesData = self.get_info()["samples"]
         from elevenlabslib.ElevenLabsSample import ElevenLabsSample
         for sampleData in samplesData:
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
-
-    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None):
-        """
-        Edit the name/labels of the voice.
-
-        Args:
-            newName (str): The new name for the voice.
-            newLabels (str): The new labels for the voice.
-        """
-        if newName is None:
-            newName = self.get_name()
-        payload = {"name": newName}
-
-        if newLabels is not None:
-            if len(newLabels.keys()) > 5:
-                raise ValueError("Too many labels! The maximum amount is 5.")
-            payload["labels"] = newLabels
-        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
 
     def add_samples_by_path(self, samples:list[str]):
         """
@@ -659,19 +657,3 @@ class ElevenLabsClonedVoice(ElevenLabsVoice):
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
 
         _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
-
-    def delete_voice(self):
-        """
-        This function deletes the current voice.
-
-        Returns:
-            None
-
-        Raises:
-            RuntimeError: If the voice is a premade voice.
-
-        """
-        if self._category == "premade":
-            raise RuntimeError("Cannot delete premade voices!")
-        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
-        self._voiceID = ""
