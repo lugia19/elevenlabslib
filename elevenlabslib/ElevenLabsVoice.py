@@ -311,7 +311,7 @@ class ElevenLabsVoice:
         return self._voiceID
 
 
-
+_defaultDType = "float32"
 class _AudioChunkStreamer:
     def __init__(self,portaudioDeviceID:int = None,onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         self._q = queue.Queue()
@@ -320,6 +320,7 @@ class _AudioChunkStreamer:
         self._bytesLock = threading.Lock()
         self._onPlaybackStart = onPlaybackStart
         self._onPlaybackEnd = onPlaybackEnd
+        self._frameSize = 0
 
         if portaudioDeviceID is None:
             portaudioDeviceID = sd.default.device
@@ -356,6 +357,7 @@ class _AudioChunkStreamer:
                 with self._bytesLock:
                     self._bytesSoundFile = sf.SoundFile(self._bytesFile)
                     logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
+                    self._frameSize = self._bytesSoundFile.channels * sf._ffi.sizeof(self._bytesSoundFile._check_dtype(_defaultDType))
                     self._events["soundFileReadyEvent"].set()
                     break
             except sf.LibsndfileError:
@@ -368,24 +370,14 @@ class _AudioChunkStreamer:
 
         stream = sd.RawOutputStream(
             samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
-            device=self._deviceID, channels=self._bytesSoundFile.channels, dtype='float32',
+            device=self._deviceID, channels=self._bytesSoundFile.channels, dtype=_defaultDType,
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
         logging.debug("Starting playback...")
         with stream:
-            #This timeout is actually irrelevant now because I'm making the queue infinite size.
-            #timeout = _playbackBlockSize * _playbackBufferSizeInBlocks / self._bytesSoundFile.samplerate
-
-            # Since I can't find any way to get the buffer size from soundfile,
-            # we will just assume the first read operation gives back a complete chunk
-            # and use that to check later reads. This SHOULD be accurate. Hopefully.
-            # Maybe there's like a weird edge case or something, hopefully not.
-            likelyReadChunkSize = -1
             while True:
-                data = self._insert_into_queue_from_download_thread()
-                if likelyReadChunkSize == -1:
-                    likelyReadChunkSize = len(data)
-                if len(data) >= likelyReadChunkSize:
-                    #logging.debug("Putting " + str(len(data)) + " bytes in queue.")
+                data = self._get_data_from_download_thread()
+                if len(data) == _playbackBlockSize*self._frameSize:
+                    logging.debug("Putting " + str(len(data)) + " bytes in queue.")
                     self._q.put(data)
                 else:
                     logging.debug("Got back less data than expected, check if we're at the end...")
@@ -403,7 +395,7 @@ class _AudioChunkStreamer:
                                 self._q.put(data)
                             break
                         else:
-                            print("We're not at the end. Wait for more data.")
+                            logging.critical("We're not at the end, yet we recieved less data than expected. THIS SHOULD NOT HAPPEN.")
             logging.debug("While loop done.")
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
@@ -454,12 +446,6 @@ class _AudioChunkStreamer:
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
         assert frames == _playbackBlockSize
-        if status.output_underflow:
-            logging.error('Output underflow: increase blocksize?')
-            #raise sd.CallbackAbort
-        #assert not status
-
-        #Underflow can happen when two streams are started at once and it doesn't seem to do anything bad so I'm just ignoring it.
 
         while True:
             try:
@@ -480,7 +466,7 @@ class _AudioChunkStreamer:
 
         if not self._events["playbackStartFired"].is_set(): #Ensure the callback only fires once.
             self._events["playbackStartFired"].set()
-            print("Firing onPlaybackStart...")
+            logging.debug("Firing onPlaybackStart...")
             self._onPlaybackStart()
 
         # Last read chunk was smaller than it should've been. It's either EOF or that stupid soundFile bug.
@@ -507,35 +493,38 @@ class _AudioChunkStreamer:
         else:
             outdata[:] = readData
     #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
-    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype="float32"):
+    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=_defaultDType):
         readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-        if len(readData) == 0:
-            logging.debug("No data read.")
-            logging.debug("Frame counter must be outdated, recreating soundfile...")
-            self._bytesFile.seek(0)
-            newSF = sf.SoundFile(self._bytesFile)
-            newSF.seek(self._bytesSoundFile.tell())
-            self._bytesSoundFile = newSF
-            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-            logging.debug("Now read " + str(len(readData)) + " bytes. I sure fucking hope that number isn't zero.")
+        logging.debug(f"Expected {dataToRead*self._frameSize} bytes, got back {len(readData)}")
+        if len(readData) < dataToRead * self._frameSize:
+            logging.debug("Insufficient data read.")
+            curPos = self._bytesFile.tell()
+            endPos = self._bytesFile.seek(0, os.SEEK_END)
+            if curPos != endPos:
+                logging.debug("We're not at the end of the file. Check if we're out of frames.")
+                logging.debug("Recreating soundfile...")
+                self._bytesFile.seek(0)
+                newSF = sf.SoundFile(self._bytesFile, mode="r")
+                newSF.seek(self._bytesSoundFile.tell() - int(len(readData) / self._frameSize))
+                if newSF.frames > self._bytesSoundFile.frames:
+                    logging.debug("Frame counter was outdated.")
+                    self._bytesSoundFile = newSF
+                    readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+                    logging.debug("Now read " + str(len(readData)) +
+                          " bytes. I sure hope that number isn't zero.")
         return readData
 
-    def _insert_into_queue_from_download_thread(self) -> bytes:
+    def _get_data_from_download_thread(self) -> bytes:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()
         try:
             readData = self._soundFile_read_and_fix(_playbackBlockSize)
-        except AssertionError as e:
-            logging.debug("Exception in buffer_read (likely not enough data left), read what is available...")
-            try:
-                readData = self._soundFile_read_and_fix()
-            except AssertionError as en:
-                logging.debug("Mismatch in the number of frames read.")
-                logging.debug("This only seems to be an issue when it happens with files that have ID3v2 tags.")
-                logging.debug("Ignore it and return empty.")
-                readData = b""
+        except AssertionError as en:
+            logging.debug("Mismatch in the number of frames read.")
+            logging.debug("This only seems to be an issue when it happens with files that have ID3v2 tags.")
+            logging.debug("Ignore it and return empty.")
+            readData = b""
 
-        #logging.debug("Checking remaining bytes...")
         currentPos = self._bytesFile.tell()
         self._bytesFile.seek(0, os.SEEK_END)
         endPos = self._bytesFile.tell()
