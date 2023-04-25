@@ -27,5 +27,6 @@ classifiers = [
 ]
 
 [project.urls]
+"Documentation" = "https://elevenlabslib.readthedocs.io/en/latest/"
 "Homepage" = "https://github.com/lugia19/elevenlabslib"
 "Bug Tracker" = "https://github.com/lugia19/elevenlabslib"
