@@ -5,6 +5,8 @@
 
 Python wrapper for the full elevenlabs API.
 
+### **Documentation now available at https://elevenlabslib.readthedocs.io/en/latest/**
+
 # Installation
 
 Just run `pip install elevenlabslib`, it's on [pypi](https://pypi.org/project/elevenlabslib/).
@@ -15,7 +17,7 @@ Note: On Linux, you may need to install portaudio. On debian and derivatives, it
 
 # Usage
 
-### **For a far more comprehensive example, check [example.py](https://github.com/lugia19/elevenlabslib/blob/master/example.py).**
+For a far more comprehensive example, check [example.py](https://github.com/lugia19/elevenlabslib/blob/master/example.py) or [the docs](https://elevenlabslib.readthedocs.io/en/latest/).
 
 Here is a very simple usage sample. 
 - Retrieves a voice based on the name
