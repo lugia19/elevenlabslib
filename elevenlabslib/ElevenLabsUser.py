@@ -249,7 +249,7 @@ class ElevenLabsUser:
 
         return response.headers["generated_voice_id"], response.content
 
-    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple:str, bytes], voiceName:str) -> ElevenLabsDesignedVoice:
+    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple[str, bytes]], voiceName:str) -> ElevenLabsDesignedVoice:
         """
             Saves a voice generated via design_voice to your account, with the given name.
 
