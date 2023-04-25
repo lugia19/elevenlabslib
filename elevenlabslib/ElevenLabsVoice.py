@@ -32,8 +32,12 @@ class ElevenLabsVoice:
     @staticmethod
     def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
         """
-        This function lets you override the values used for the streaming function FOR ALL VOICES.
-        Please only do this if you know what you're doing.
+        This function lets you override the default values used for the streaming function.
+
+        Danger:
+            This change affects all voices.
+
+            Please only do this if you know what you're doing.
 
         Parameters:
             playbackBlockSize (int): The size (in frames) of the blocks used for playback.
@@ -193,8 +197,8 @@ class ElevenLabsVoice:
         Generate audio bytes from the given prompt and play them using sounddevice.
 
         Tip:
-            This function downloads the entire file before playing it back.
-            If you need faster response times, use generate_and_stream_audio
+            This function downloads the entire file before playing it back, and even if playInBackground is set, it will halt execution until the file is downloaded.
+            If you need faster response times and background downloading and playback, use generate_and_stream_audio.
 
         Parameters:
         	prompt (str): The text prompt to generate audio from.
@@ -204,12 +208,13 @@ class ElevenLabsVoice:
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
         	onPlaybackStart: Function to call once the playback begins
         	onPlaybackEnd: Function to call once the playback ends
+
         Returns:
-        The data from the response (such as the number of tokens used).
+            The audio bytes.
         """
         audioData = self.generate_audio_bytes(prompt, stability, similarity_boost)
         play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return
+        return audioData
 
     def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
@@ -219,10 +224,9 @@ class ElevenLabsVoice:
         Note:
             No longer suffers from the skipping issues it had in the past.
 
-        Note:
-            Almost always faster than generate_and_play_audio, but how much faster may depend on your connection and the current load on the servers.
-
         Generate audio bytes from the given prompt and stream them using sounddevice.
+
+        If streamInBackground is true, it will download the audio data in a separate thread, without pausing the main thread.
 
         Parameters:
             streamInBackground (bool): Whether or not to play the audio (and let the download complete) in a separate thread.
@@ -232,8 +236,7 @@ class ElevenLabsVoice:
             similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
-        Returns:
-        None
+
         """
         payload = self._generate_payload(prompt, stability, similarity_boost)
         path = "/text-to-speech/" + self._voiceID + "/stream"
@@ -379,17 +382,20 @@ class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
 
-    def add_samples_by_path(self, samples:list[str]):
+    def add_samples_by_path(self, samples:list[str]|str):
         """
         This function adds samples to the current voice by their file paths.
 
         Args:
-            samples (list[str]): A list with the file paths to the audio files.
+            samples (list[str]|str): A list with the file paths to the audio files or a str containing a single path.
 
         Raises:
             ValueError: If no samples are provided.
 
         """
+        if isinstance(samples, str):
+            samples = list(samples)
+
         sampleBytes = {}
         for samplePath in samples:
             if "\\" in samplePath:

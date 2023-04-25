@@ -177,12 +177,12 @@ def main():
 
         #Generate a sample and save it to disk, then play it back.
         mp3Data = premadeVoice.generate_audio_bytes("Test.")
-        save_audio_bytes("test.wav",mp3Data,"wav")
+        save_audio_bytes(mp3Data, "test.wav","wav")
         play_audio_bytes(open("test.wav","rb").read(),False,6)
 
         #Generate a sample and save it to a file-like object, then play it back.
         memoryFile = io.BytesIO()
-        save_audio_bytes(memoryFile, mp3Data, "ogg")
+        save_audio_bytes(mp3Data, memoryFile, "ogg")
         memoryFile.seek(0)  #Seek the back to the beginning
         play_audio_bytes(memoryFile.read(), playInBackground=False)
     except requests.exceptions.RequestException:
@@ -197,13 +197,21 @@ def main():
     except requests.exceptions.RequestException:
         print("Couldn't generate an output, likely out of tokens.")
 
-    #Play back and delete the test items we created from both accounts:
+
+
+    #Get, download and delete all the test generations
+    testItems = list()
+
     for account in [user, newUser]:
         for historyItem in account.get_history_items():
             if historyItem.text == "Test.":
-                print("Found test history item, playing it back and deleting it.")
-                historyItem.play_audio(playInBackground=False)
-                historyItem.delete()
+                testItems.append(historyItem)
+
+    downloadedItems = user.download_history_items(testItems)
+
+    # Delete them
+    for item in testItems:
+        item.delete()
 
 
 def getNumber(prompt, minValue, maxValue) -> int:

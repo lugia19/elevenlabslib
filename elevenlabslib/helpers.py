@@ -88,18 +88,18 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
     else:
         playbackWrapper.stream.start()
 
-def save_audio_bytes(saveLocation:Union[BinaryIO,str], audioData:bytes, outputFormat) -> None:
+def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
     """
         This function saves the audio data to the specified location OR file-like object.
         soundfile is used for the conversion, so it supports any format it does.
 
         Parameters:
-            saveLocation: The path (or file-like object) where the data will be saved.
             audioData: The audio data.
+            saveLocation: The path (or file-like object) where the data will be saved.
             outputFormat: The format in which the audio will be saved
         """
 
-    if saveLocation is str:
+    if isinstance(saveLocation, str):
         saveLocation = open(saveLocation, "wb")
     tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
     sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)

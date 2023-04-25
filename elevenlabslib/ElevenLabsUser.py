@@ -196,9 +196,9 @@ class ElevenLabsUser:
 
         historyItemIDs = list()
         for item in historyItems:
-            if item is str:
+            if isinstance(item, str):
                 historyItemIDs.append(item)
-            elif item is ElevenLabsHistoryItem:
+            else:
                 historyItemIDs.append(item.historyID)
 
         payload = {"history_item_ids": historyItemIDs}
@@ -271,17 +271,20 @@ class ElevenLabsUser:
         return self.get_voice_by_ID(response.json()["voice_id"])
 
 
-    def clone_voice_by_path(self, name:str, samples: list[str]) -> ElevenLabsClonedVoice:
+    def clone_voice_by_path(self, name:str, samples: list[str]|str) -> ElevenLabsClonedVoice:
         """
             Create a new ElevenLabsClonedVoice object by providing the voice name and a list of sample file paths.
 
             Args:
                 name (str): Name of the voice to be created.
-                samples (list[str]): List of file paths for the voice samples.
+                samples (list[str]|str): List of file paths for the voice samples (or a single path).
 
             Returns:
                 ElevenLabsClonedVoice: The new voice.
         """
+        if isinstance(samples, str):
+            samples = list(samples)
+
         sampleBytes = {}
         for samplePath in samples:
             if "\\" in samplePath:

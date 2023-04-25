@@ -9,6 +9,9 @@ class ElevenLabsHistoryItem:
     Represents a previously generated audio.
 
     Note:
+        There is no way to get an instance of ElevenLabsHistoryItem from a historyID, as there is no endpoint that returns that information.
+
+    Tip:
         There is no method to get an ElevenLabsVoice object for the voice that was used to create the file as it may not exist anymore.
         You can use the voiceID for that.
     """
