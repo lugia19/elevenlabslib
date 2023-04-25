@@ -7,6 +7,10 @@ from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
 class ElevenLabsHistoryItem:
     """
     Represents a previously generated audio.
+
+    Note:
+        There is no method to get an ElevenLabsVoice object for the voice that was used to create the file as it may not exist anymore.
+        You can use the voiceID for that.
     """
     def __init__(self, data:dict, parentUser:ElevenLabsUser):
         """
@@ -24,18 +28,79 @@ class ElevenLabsHistoryItem:
         self._dateUnix = data["date_unix"]
         self._characterCountChangeFrom = data["character_count_change_from"]
         self._characterCountChangeTo = data["character_count_change_to"]
-        self._contentType = data["content_type"]
-        self._state = data["state"]
+        self._fullMetadata = data
         self._audioData = None
+
+    @property
+    def metadata(self):
+        """
+        All the metadata associated with the item.
+        """
+        return self._fullMetadata
+
+    @property
+    def historyID(self):
+        """
+        The ID of the history item.
+        """
+        return self._historyID
+
+    @property
+    def parentUser(self):
+        """
+        The ElevenLabsUser object for the user that generated this item.
+        """
+        return self._parentUser
+
+    @property
+    def voiceId(self):
+        """
+        The voiceID of the voice used.
+        """
+        return self._voiceId
+
+    @property
+    def voiceName(self):
+        """
+        The name of the voice used.
+        """
+        return self._voiceName
+
+    @property
+    def text(self):
+        """
+        The text of the item.
+        """
+        return self._text
+
+    @property
+    def characterCountChangeFrom(self):
+        return self._characterCountChangeFrom
+
+    @property
+    def characterCountChangeTo(self):
+        return self._characterCountChangeTo
+
+    @property
+    def characterCountChangeAmount(self):
+        """
+        How many characters this generation used.
+        """
+        return self._characterCountChangeTo - self._characterCountChangeFrom
 
     def get_audio_bytes(self) -> bytes:
         """
         Retrieves the audio bytes associated with the history item.
-        IMPORTANT: If you're looking to download multiple history items, use the user function instead.
-        That will download a zip containing all the history items (by calling a different endpoint).
+
+        Note:
+            The audio will be cached so that it's not downloaded every time this is called.
+
+        Caution:
+            If you're looking to download multiple history items, use ElevenLabsUser.download_history_items() instead.
+            That will call a different endpoint, optimized for multiple downloads.
 
         Returns:
-            bytes: a bytes object containing the audio in mp3 format.
+            bytes: The bytes of the mp3 file.
         """
         if self._audioData is None:
             response = _api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
@@ -58,53 +123,10 @@ class ElevenLabsHistoryItem:
 
     def delete(self):
         """
-        Deletes the history item.
+        Deletes the item from your history.
         """
         response = _api_del("/history/" + self.historyID, self._parentUser.headers)
         self._historyID = ""
 
-    @property
-    def historyID(self):
-        return self._historyID
 
-    @property
-    def parentUser(self):
-        return self._parentUser
-
-    #There is no method to get the original voice as an object because it might not exist anymore.
-    @property
-    def voiceId(self):
-        return self._voiceId
-
-    @property
-    def voiceName(self):
-        return self._voiceName
-
-    @property
-    def text(self):
-        return self._text
-
-    @property
-    def dateUnix(self):
-        return self._dateUnix
-
-    @property
-    def characterCountChangeFrom(self):
-        return self._characterCountChangeFrom
-
-    @property
-    def characterCountChangeTo(self):
-        return self._characterCountChangeTo
-
-    @property
-    def characterCountChangeAmount(self):
-        return self._characterCountChangeTo-self._characterCountChangeFrom
-
-    @property
-    def contentType(self):
-        return self._contentType
-
-    @property
-    def state(self):
-        return self._state
 

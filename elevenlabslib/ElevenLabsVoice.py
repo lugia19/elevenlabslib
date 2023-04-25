@@ -26,6 +26,7 @@ _downloadChunkSize = 4096
 class ElevenLabsVoice:
     """
     Represents a voice in the ElevenLabs API.
+
     It's the parent class for all voices, and used directly for the premade and designed ones.
     """
     @staticmethod
@@ -33,8 +34,10 @@ class ElevenLabsVoice:
         """
         This function lets you override the values used for the streaming function FOR ALL VOICES.
         Please only do this if you know what you're doing.
-        :param playbackBlockSize: The size (in bytes) of the byte blocks used for playback.
-        :param downloadChunkSize: The size (in bytes) of the chunks to be downloaded.
+
+        Parameters:
+            playbackBlockSize (int): The size (in frames) of the blocks used for playback.
+            downloadChunkSize (int): The size (in bytes) of the chunks to be downloaded.
         """
         global _playbackBlockSize, _downloadChunkSize
         if playbackBlockSize is not None:
@@ -45,10 +48,14 @@ class ElevenLabsVoice:
     @staticmethod
     def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
         """
-        Initializes a new instance of either ElevenLabsVoice or ElevenLabsGeneratedVoice or ElevenLabsClonedVoice depending on the category.
+        Initializes a new instance of ElevenLabsVoice or one of its subclasses depending on voiceData.
+
         Args:
             voiceData: A dictionary containing the voice data.
             linkedUser: An instance of the ElevenLabsUser class representing the linked user.
+
+        Returns:
+            ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice: The voice object
         """
         if voiceData["category"] == "premade":
             return ElevenLabsVoice(voiceData, linkedUser)
@@ -63,6 +70,7 @@ class ElevenLabsVoice:
         """
         Initializes a new instance of the ElevenLabsVoice class.
         Don't use this constructor directly. Use the factory instead.
+
         Args:
             voiceData: A dictionary containing the voice data.
             linkedUser: An instance of the ElevenLabsUser class representing the linked user.
@@ -73,6 +81,64 @@ class ElevenLabsVoice:
         self.initialName = voiceData["name"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
+
+    def get_settings(self) -> dict:
+        """
+        Returns:
+            dict: The current generation settings of the voice (stability and clarity).
+        """
+        response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
+        return response.json()
+    def get_info(self) -> dict:
+        """
+        Tip:
+            I've only added specific getters for the most common attributes (name/description).
+
+            Use this function for all other metadata.
+
+        Returns:
+            dict: A dict containing all the metadata for the voice, such as the name, the description, etc.
+        """
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        return response.json()
+
+    def get_name(self) -> str:
+        """
+        Returns:
+            str: The name of the voice.
+        """
+        return self.get_info()["name"]
+
+    def get_description(self) -> str|None:
+        """
+        Returns:
+            str: The description of the voice.
+        """
+        return self.get_info()["description"]
+
+    def edit_settings(self, stability:float=None, similarity_boost:float=None):
+        """
+        Note:
+            If either argument is omitted, the current values will be used instead.
+
+        Edit the settings of the current voice.
+
+        Args:
+            stability (float, optional): The stability of the voice.
+            similarity_boost (float, optional): The similarity boost of the voice.
+
+        Raises:
+            ValueError: If the provided stability or similarity_boost value is not between 0 and 1.
+        """
+        if stability is None or similarity_boost is None:
+            oldSettings = self.get_settings()
+            if stability is None: stability = oldSettings["stability"]
+            if similarity_boost is None: stability = oldSettings["similarity_boost"]
+
+        if not(0 <= stability <= 1 and 0 <= similarity_boost <= 1):
+            raise ValueError("Please provide a value between 0 and 1.")
+        payload = {"stability": stability, "similarity_boost": similarity_boost}
+        _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
     def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> dict:
         """
@@ -102,16 +168,18 @@ class ElevenLabsVoice:
         """
         Generates speech for the given prompt and returns the audio data as bytes of an mp3 file.
 
+        Tip:
+            If you would like to save the audio to disk or otherwise, you can use helpers.save_audio_bytes().
+
         Args:
         	prompt: The prompt to generate speech for.
         	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
 
         Returns:
-        	The bytes of the audio file, and the json data (such as the number of tokens used).
+        	The bytes of the audio file.
+
         """
-        #The output from the site is an mp3 file.
-        #You can check the README for an example of how to convert it to wav on the fly using pydub and bytesIO.
         payload = self._generate_payload(prompt, stability, similarity_boost)
         response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
 
@@ -123,6 +191,10 @@ class ElevenLabsVoice:
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
+
+        Tip:
+            This function downloads the entire file before playing it back.
+            If you need faster response times, use generate_and_stream_audio
 
         Parameters:
         	prompt (str): The text prompt to generate audio from.
@@ -143,18 +215,23 @@ class ElevenLabsVoice:
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
         """
-        Generate audio bytes from the given prompt and play them using sounddevice in callback mode.
-        Sometimes make the audio skip slightly, but the audio begins playing more quickly.
-        I've measured it and on average it takes around 0.5-ish seconds less than the normal generate function.
-        It may be less depending on your subscription level.
+
+        Note:
+            No longer suffers from the skipping issues it had in the past.
+
+        Note:
+            Almost always faster than generate_and_play_audio, but how much faster may depend on your connection and the current load on the servers.
+
+        Generate audio bytes from the given prompt and stream them using sounddevice.
+
         Parameters:
             streamInBackground (bool): Whether or not to play the audio (and let the download complete) in a separate thread.
-        	prompt (str): The text prompt to generate audio from.
-        	portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
-        	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-        	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-        	onPlaybackStart: Function to call once the playback begins
-        	onPlaybackEnd: Function to call once the playback ends
+            prompt (str): The text prompt to generate audio from.
+            portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
+            stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
+            similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
+            onPlaybackStart: Function to call once the playback begins
+            onPlaybackEnd: Function to call once the playback ends
         Returns:
         None
         """
@@ -162,9 +239,6 @@ class ElevenLabsVoice:
         path = "/text-to-speech/" + self._voiceID + "/stream"
 
         streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
-
-        #testURL = "https://litter.catbox.moe/sk8cwj.mp3"
-        #streamedResponse = requests.get(testURL, stream=True)
 
         streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
@@ -176,29 +250,18 @@ class ElevenLabsVoice:
 
         return
 
-    def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
-        """
-        Plays the preview audio.
 
-        Args:
-            playInBackground: A bool indicating whether to play the audio in the background.
-            portaudioDeviceID: Optional int indicating the device ID to use for audio playback.
-        	onPlaybackStart: Function to call once the playback begins
-        	onPlaybackEnd: Function to call once the playback ends
-        Returns:
-            None
+    def get_preview_url(self) -> str|None:
         """
-        # This will error out if the preview hasn't been generated
-        play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return
+        Returns:
+            str|None: The preview URL of the voice, or None if it hasn't been generated.
+        """
+        return self.get_info()["preview_url"]
 
     def get_preview_bytes(self) -> bytes:
         """
-        Returns the preview audio in bytes.
-
         Returns:
-            bytes: The preview audio in bytes.
+            bytes: The preview audio bytes.
 
         Raises:
             RuntimeError: If no preview URL is available.
@@ -209,82 +272,40 @@ class ElevenLabsVoice:
             raise RuntimeError("No preview URL available!")
         response = requests.get(previewURL, allow_redirects=True)
         return response.content
-    def get_settings(self) -> dict:
-        """
-        Get the name of the current voice.
 
-        Returns:
-            str: The name of the voice.
+    def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
         """
-        # We don't store the name OR the settings, as they can be changed externally.
-        response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
-        return response.json()
-    def get_info(self) -> dict:
-        """
-        Get the raw metadata for the voice.
-        Returns:
-            dict: A dict containing all the metadata
-        """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
-        return response.json()
-
-    #I've settled on only providing dedicated getters for the (imo) most common fields, name, description and labels. For everything else, there's the get_info method.
-    def get_name(self) -> str:
-        """
-        Get the name of the current voice.
-
-        Returns:
-            str: The name of the voice.
-        """
-        return self.get_info()["name"]
-
-    def get_description(self) -> str|None:
-        """
-        Get the description.
-
-        Returns:
-            str: The description for the voice.
-        """
-        return self.get_info()["description"]
-
-    def get_preview_url(self) -> str|None:
-        """
-        Get the preview URL of the current voice.
-
-        Returns:
-            str|None: The preview URL of the voice, or None if it doesn't exist.
-        """
-        return self.get_info()["preview_url"]
-
-    def edit_settings(self, stability:float=None, similarity_boost:float=None):
-        """
-        Edit the settings of the current voice.
+        Plays the preview audio.
 
         Args:
-            stability (float, optional): The stability of the voice. If None, the current stability setting will be used. Defaults to None.
-            similarity_boost (float, optional): The similarity boost of the voice. If None, the current similarity boost setting will be used. Defaults to None.
+            playInBackground: A bool indicating whether to play the audio in the background.
+            portaudioDeviceID: Optional int indicating the device ID to use for audio playback.
+        	onPlaybackStart: Function to call once the playback begins
+        	onPlaybackEnd: Function to call once the playback ends
 
-        Raises:
-            ValueError: If the provided stability or similarity_boost value is not between 0 and 1.
+        Returns:
+            None
         """
-        if stability is None or similarity_boost is None:
-            oldSettings = self.get_settings()
-            if stability is None: stability = oldSettings["stability"]
-            if similarity_boost is None: stability = oldSettings["similarity_boost"]
 
-        if not(0 <= stability <= 1 and 0 <= similarity_boost <= 1):
-            raise ValueError("Please provide a value between 0 and 1.")
-        payload = {"stability": stability, "similarity_boost": similarity_boost}
-        _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
+        play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+        return
 
     @property
     def category(self):
+        """
+        This property indicates the "type" of the voice, whether it's premade, cloned, designed etc.
+        """
         return self._category
-    # Since the same voice can be available for multiple users, we allow the user to change which API key is used.
+
     @property
     def linkedUser(self):
         """
-        Returns the user currently linked to the voice, whose API key will be used.
+        Note:
+            This property can also be set.
+            This is mostly in case some future update adds shared voices (beyond the currently available premade ones).
+
+        The user currently linked to the voice, whose API key will be used to generate audio.
 
         Returns:
             ElevenLabsUser: The user linked to the voice.
@@ -300,9 +321,6 @@ class ElevenLabsVoice:
         Args:
             newUser (ElevenLabsUser): The new user to link to the voice.
 
-        Returns:
-            None
-
         """
         self._linkedUser = newUser
 
@@ -311,6 +329,101 @@ class ElevenLabsVoice:
         return self._voiceID
 
 
+class ElevenLabsDesignedVoice(ElevenLabsVoice):
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None, description:str = None):
+        """
+        Edit the name/labels of the voice.
+
+        Args:
+            newName (str): The new name
+            newLabels (str): The new labels
+            description (str): The new description
+        """
+        currentInfo = self.get_info()
+        payload = {
+            "name": currentInfo["name"],
+            "labels": currentInfo["labels"],
+            "description": currentInfo["description"]
+        }
+        if newName is not None:
+            payload["name"] = newName
+        if newLabels is not None:
+            if len(newLabels.keys()) > 5:
+                raise ValueError("Too many labels! The maximum amount is 5.")
+            payload["labels"] = newLabels
+        if description is not None:
+            payload["description"] = description
+        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
+    def delete_voice(self):
+        """
+        This function deletes the voice, and also sets the voiceID to be empty.
+        """
+        if self._category == "premade":
+            raise RuntimeError("Cannot delete premade voices!")
+        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
+        self._voiceID = ""
+
+
+class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+    def get_samples(self) -> list[ElevenLabsSample]:
+        outputList = list()
+        samplesData = self.get_info()["samples"]
+        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
+        for sampleData in samplesData:
+            outputList.append(ElevenLabsSample(sampleData, self))
+        return outputList
+
+    def add_samples_by_path(self, samples:list[str]):
+        """
+        This function adds samples to the current voice by their file paths.
+
+        Args:
+            samples (list[str]): A list with the file paths to the audio files.
+
+        Raises:
+            ValueError: If no samples are provided.
+
+        """
+        sampleBytes = {}
+        for samplePath in samples:
+            if "\\" in samplePath:
+                fileName = samplePath[samplePath.rindex("\\")+1:]
+            else:
+                fileName = samplePath
+            sampleBytes[fileName] = open(samplePath, "rb").read()
+        self.add_samples_bytes(sampleBytes)
+
+    #Requires a dict of filenames and bytes
+    def add_samples_bytes(self, samples:dict[str, bytes]):
+        """
+        This function adds samples to the current voice by their file names and bytes.
+
+        Args:
+            samples (dict[str, bytes]): A dictionary of audio file names and their respective bytes.
+
+        Raises:
+            ValueError: If no samples are provided.
+
+        """
+        if len(samples.keys()) == 0:
+            raise ValueError("Please add at least one sample!")
+
+        payload = {"name":self.get_name()}
+        files = list()
+        for fileName, fileBytes in samples.items():
+            files.append(("files", (fileName, io.BytesIO(fileBytes))))
+
+        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
+
+
+
+#This way lies only madness.
 _defaultDType = "float32"
 class _AudioChunkStreamer:
     def __init__(self,portaudioDeviceID:int = None,onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
@@ -337,8 +450,6 @@ class _AudioChunkStreamer:
         }
 
     def begin_streaming(self, streamedResponse:requests.Response):
-        #After re-relooking at this, I was stupid, the queue is actually necessary.
-
         # Clean all the buffers and reset all events.
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
@@ -541,108 +652,3 @@ class _AudioChunkStreamer:
         self._bytesLock.release()
         return readData
 
-
-class ElevenLabsDesignedVoice(ElevenLabsVoice):
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
-        super().__init__(voiceData, linkedUser)
-
-    def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None, description:str = None):
-        """
-        Edit the name/labels of the voice.
-
-        Args:
-            newName (str): The new name
-            newLabels (str): The new labels
-            description (str): The new description
-        """
-        currentInfo = self.get_info()
-        payload = {
-            "name": currentInfo["name"],
-            "labels": currentInfo["labels"],
-            "description": currentInfo["description"]
-        }
-        if newName is not None:
-            payload["name"] = newName
-        if newLabels is not None:
-            if len(newLabels.keys()) > 5:
-                raise ValueError("Too many labels! The maximum amount is 5.")
-            payload["labels"] = newLabels
-        if description is not None:
-            payload["description"] = description
-        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
-    def delete_voice(self):
-        """
-        This function deletes the current voice.
-
-        Returns:
-            None
-
-        Raises:
-            RuntimeError: If the voice is a premade voice.
-
-        """
-        if self._category == "premade":
-            raise RuntimeError("Cannot delete premade voices!")
-        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
-        self._voiceID = ""
-
-
-class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
-        super().__init__(voiceData, linkedUser)
-
-    def get_samples(self) -> list[ElevenLabsSample]:
-        outputList = list()
-        samplesData = self.get_info()["samples"]
-        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
-        for sampleData in samplesData:
-            outputList.append(ElevenLabsSample(sampleData, self))
-        return outputList
-
-    def add_samples_by_path(self, samples:list[str]):
-        """
-        This function adds samples to the current voice by their file paths.
-
-        Args:
-            samples (list[str]): A list of file paths to the sample audio files.
-
-        Returns:
-            None
-
-        Raises:
-            ValueError: If no samples are provided.
-
-        """
-        sampleBytes = {}
-        for samplePath in samples:
-            if "\\" in samplePath:
-                fileName = samplePath[samplePath.rindex("\\")+1:]
-            else:
-                fileName = samplePath
-            sampleBytes[fileName] = open(samplePath, "rb").read()
-        self.add_samples_bytes(sampleBytes)
-
-    #Requires a dict of filenames and bytes
-    def add_samples_bytes(self, samples:dict[str, bytes]):
-        """
-        This function adds samples to the current voice by their file names and bytes.
-
-        Args:
-            samples (dict[str, bytes]): A dictionary of sample audio file names and their respective bytes.
-
-        Returns:
-            None
-
-        Raises:
-            ValueError: If no samples are provided.
-
-        """
-        if len(samples.keys()) == 0:
-            raise ValueError("Please add at least one sample!")
-
-        payload = {"name":self.get_name()}
-        files = list()
-        for fileName, fileBytes in samples.items():
-            files.append(("files", (fileName, io.BytesIO(fileBytes))))
-
-        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)

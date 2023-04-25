@@ -177,12 +177,12 @@ def main():
 
         #Generate a sample and save it to disk, then play it back.
         mp3Data = premadeVoice.generate_audio_bytes("Test.")
-        save_bytes_to_path("test.wav",mp3Data)
+        save_audio_bytes("test.wav",mp3Data,"wav")
         play_audio_bytes(open("test.wav","rb").read(),False,6)
 
         #Generate a sample and save it to a file-like object, then play it back.
         memoryFile = io.BytesIO()
-        save_bytes_to_file_object(memoryFile, mp3Data, "ogg")
+        save_audio_bytes(memoryFile, mp3Data, "ogg")
         memoryFile.seek(0)  #Seek the back to the beginning
         play_audio_bytes(memoryFile.read(), playInBackground=False)
     except requests.exceptions.RequestException:
