@@ -98,11 +98,14 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
             saveLocation: The path (or file-like object) where the data will be saved.
             outputFormat: The format in which the audio will be saved
         """
+    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
 
     if isinstance(saveLocation, str):
-        saveLocation = open(saveLocation, "wb")
-    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
-    sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
+        with open(saveLocation, "wb") as fp:
+            sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
+    else:
+        sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
+        saveLocation.flush()
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:
