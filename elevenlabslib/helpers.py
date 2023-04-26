@@ -50,8 +50,8 @@ def _api_multipart(path, headers, data=None, filesData=None):
 
 def _pretty_print_POST(res:requests.Response):
     req = res.request
-    logging.error(f"RESPONSE DATA: {res.text}")
-    logging.error('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
+    logging.debug(f"RESPONSE DATA: {res.text}")
+    logging.debug('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
         '-----------START-----------',
         req.method + ' ' + req.url,
         '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),

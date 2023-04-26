@@ -35,11 +35,21 @@ class ElevenLabsUser:
         self._xi_api_key = xi_api_key
         self._headers = default_headers
         self._headers["xi-api-key"] = self._xi_api_key
+
         try:
             self.get_available_voices()
-        except requests.exceptions.RequestException:
-            raise ValueError("Invalid API Key!")
+        except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
+            try:
+                responseJson = e.response.json()
+                responseStatus = responseJson["detail"]["status"]
+                # If those keys aren't present it'll error out and raise e anyway.
+            except:
+                raise e
 
+            if responseStatus == "invalid_api_key":
+                raise ValueError("Invalid API Key!")
+            else:
+                raise e
     def _get_subscription_data(self) -> dict:
         response = _api_get("/user/subscription", self._headers)
         subscriptionData = response.json()
