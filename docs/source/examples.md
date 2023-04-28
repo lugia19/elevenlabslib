@@ -110,8 +110,6 @@ from elevenlabslib import *
 
 api_key = "INSERT KEY HERE"
 user = ElevenLabsUser(api_key)
-
-#Generate two items to be deleted later
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 #Print the models available to the user (you'll need the model_id for the multilingual one)
