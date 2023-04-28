@@ -144,7 +144,7 @@ class ElevenLabsVoice:
         payload = {"stability": stability, "similarity_boost": similarity_boost}
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
-    def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> dict:
+    def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> dict:
         """
         Generates the payload for the text-to-speech API call.
 
@@ -152,11 +152,11 @@ class ElevenLabsVoice:
             prompt (str): The prompt to generate speech for.
             stability (Optional[float]): A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
             similarity_boost (Optional[float]): A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-
+            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
         Returns:
             dict: A dictionary representing the payload for the API call.
         """
-        payload = {"text": prompt}
+        payload = {"text": prompt, "model_id": model_id}
         if stability is not None or similarity_boost is not None:
             currentSettings = self.get_settings()
             if stability is None: stability = currentSettings["stability"]
@@ -168,7 +168,7 @@ class ElevenLabsVoice:
             payload["voice_settings"]["similarity_boost"] = similarity_boost
         return payload
 
-    def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None) -> bytes:
+    def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> bytes:
         """
         Generates speech for the given prompt and returns the audio data as bytes of an mp3 file.
 
@@ -179,12 +179,12 @@ class ElevenLabsVoice:
         	prompt: The prompt to generate speech for.
         	stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-
+        	model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
         Returns:
         	The bytes of the audio file.
 
         """
-        payload = self._generate_payload(prompt, stability, similarity_boost)
+        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
 
 
@@ -192,7 +192,7 @@ class ElevenLabsVoice:
 
     def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1"):
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -208,17 +208,18 @@ class ElevenLabsVoice:
         	similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
         	onPlaybackStart: Function to call once the playback begins
         	onPlaybackEnd: Function to call once the playback ends
+        	model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
 
         Returns:
             The audio bytes.
         """
-        audioData = self.generate_audio_bytes(prompt, stability, similarity_boost)
+        audioData = self.generate_audio_bytes(prompt, stability, similarity_boost, model_id)
         play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return audioData
 
     def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1"):
         """
 
         Note:
@@ -236,9 +237,10 @@ class ElevenLabsVoice:
             similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
+            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
 
         """
-        payload = self._generate_payload(prompt, stability, similarity_boost)
+        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         path = "/text-to-speech/" + self._voiceID + "/stream"
 
         streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)

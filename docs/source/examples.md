@@ -102,3 +102,20 @@ for historyID, audioData in downloadedItems.items():
 for item in testItems:
     item.delete()
 ```
+
+## Use the multilingual TTS model
+
+```python
+from elevenlabslib import *
+
+api_key = "INSERT KEY HERE"
+user = ElevenLabsUser(api_key)
+
+#Generate two items to be deleted later
+premadeVoice = user.get_voices_by_name("Rachel")[0]
+
+#Print the models available to the user (you'll need the model_id for the multilingual one)
+print(user.get_available_models())
+
+premadeVoice.generate_and_play_audio("Questa è una prova!", playInBackground=False, model_id="eleven_multilingual_v1")
+```

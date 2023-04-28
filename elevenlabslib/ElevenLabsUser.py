@@ -63,6 +63,21 @@ class ElevenLabsUser:
         """
         return self._headers
 
+    def get_available_models(self) -> list[dict]:
+        """
+        This function returns all the available models for this account.
+
+        Note:
+            You can use the model_id from a model's info for calls to the text to speech endpoint.
+
+        Returns:
+            list[dict]: All the available models for this account.
+        """
+        response = _api_get("/models", self._headers)
+        userData = response.json()
+        return userData
+
+
     def get_user_data(self) -> dict:
         """
         Returns:
