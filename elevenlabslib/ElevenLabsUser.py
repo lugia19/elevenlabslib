@@ -147,7 +147,7 @@ class ElevenLabsUser:
 
     def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
         """
-        Gets a list of voices this account can currently use.
+        Gets a list of voices this account can currently use for TTS.
 
         Returns:
             list[ElevenLabsVoice]: A list of currently usable voices.
@@ -159,6 +159,9 @@ class ElevenLabsUser:
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
             if voiceData["category"] == "cloned" and not canUseClonedVoices:
+                continue
+            if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "complete":
+                #TODO: Change this value to the proper one once I actually know what it is. "complete" is merely a placeholder.
                 continue
             availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
 
