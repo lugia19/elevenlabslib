@@ -138,12 +138,12 @@ class ElevenLabsUser:
             list[ElevenLabsVoice]: A list containing all the voices.
         """
         response = _api_get("/voices", headers=self._headers)
-        availableVoices: list[ElevenLabsVoice] = list()
+        allVoices: list[ElevenLabsVoice] = list()
         voicesData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
-            availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
-        return availableVoices
+            allVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
+        return allVoices
 
     def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
         """
@@ -152,13 +152,16 @@ class ElevenLabsUser:
         Returns:
             list[ElevenLabsVoice]: A list of currently usable voices.
         """
-        allVoices = self.get_all_voices()
+        response = _api_get("/voices", headers=self._headers)
+        voicesData = response.json()
         availableVoices = list()
         canUseClonedVoices = self.get_voice_clone_available()
-        for voice in allVoices:
-            if voice.category == "cloned" and not canUseClonedVoices:
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        for voiceData in voicesData["voices"]:
+            if voiceData["category"] == "cloned" and not canUseClonedVoices:
                 continue
-            availableVoices.append(voice)
+            availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
+
         return availableVoices
 
     def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
@@ -188,11 +191,14 @@ class ElevenLabsUser:
         Returns:
             list[ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice]: A list of matching voices.
         """
-        allVoices = self.get_available_voices()
+        response = _api_get("/voices", headers=self._headers)
+        voicesData = response.json()
         matchingVoices = list()
-        for voice in allVoices:
-            if voice.initialName == voiceName:
-                matchingVoices.append(voice)
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        for voiceData in voicesData["voices"]:
+            if voiceData["name"] == "voiceName":
+                matchingVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
+
         return matchingVoices
 
     def get_history_items(self) -> list[ElevenLabsHistoryItem]:
