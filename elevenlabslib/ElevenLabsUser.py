@@ -196,7 +196,7 @@ class ElevenLabsUser:
         matchingVoices = list()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         for voiceData in voicesData["voices"]:
-            if voiceData["name"] == "voiceName":
+            if voiceData["name"] == voiceName:
                 matchingVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
 
         return matchingVoices
