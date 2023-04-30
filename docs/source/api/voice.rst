@@ -13,3 +13,7 @@ Voice
 .. autoclass:: elevenlabslib.ElevenLabsClonedVoice
     :members:
     :show-inheritance:
+
+.. autoclass:: elevenlabslib.ElevenLabsProfessionalVoice
+    :members:
+    :show-inheritance:
