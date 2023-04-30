@@ -106,7 +106,7 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
             sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
     else:
         sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-        if os.name != 'nt':
+        if callable(getattr(saveLocation,"flush")):
             saveLocation.flush()
 
 #This class just helps with the callback stuff.
