@@ -7,6 +7,7 @@ import sounddevice as sd
 import soundfile
 import soundfile as sf
 import requests
+import os
 
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
@@ -105,7 +106,8 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
             sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
     else:
         sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-        saveLocation.flush()
+        if os.name != 'nt':
+            saveLocation.flush()
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:
