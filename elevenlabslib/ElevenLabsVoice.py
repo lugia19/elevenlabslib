@@ -61,14 +61,17 @@ class ElevenLabsVoice:
         Returns:
             ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice: The voice object
         """
-        if voiceData["category"] == "premade":
+        category = voiceData["category"]
+        if category == "premade":
             return ElevenLabsVoice(voiceData, linkedUser)
-        elif voiceData["category"] == "cloned":
+        elif category == "cloned":
             return ElevenLabsClonedVoice(voiceData, linkedUser)
-        elif voiceData["category"] == "generated":
+        elif category == "generated":
             return ElevenLabsDesignedVoice(voiceData, linkedUser)
+        elif category == "professional":
+            return ElevenLabsProfessionalVoice(voiceData, linkedUser)
         else:
-            raise ValueError(voiceData["category"] + " is not a valid voice category!")
+            raise ValueError(f"{category} is not a valid voice category!")
 
     def __init__(self, voiceData, linkedUser:ElevenLabsUser):
         """
@@ -371,12 +374,39 @@ class ElevenLabsDesignedVoice(ElevenLabsVoice):
         response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
 
+class ElevenLabsProfessionalVoice(ElevenLabsDesignedVoice):
+    """
+    Note:
+        This is merely a stub for the time being, as professional voices are not yet fully available.
+    """
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+    def get_samples(self) -> list[ElevenLabsSample]:
+        """
+        Caution:
+            There is an API bug here. The /voices/voiceID endpoint does not correctly return sample data for professional cloning voices.
+
+        Returns:
+            list[ElevenLabsSample]: The samples that make up this professional voice clone.
+        """
+        outputList = list()
+        samplesData = self.get_info()["samples"]
+        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
+        for sampleData in samplesData:
+            outputList.append(ElevenLabsSample(sampleData, self))
+        return outputList
 
 class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
     def get_samples(self) -> list[ElevenLabsSample]:
+        """
+        Returns:
+            list[ElevenLabsSample]: The samples that make up this voice clone.
+        """
+
         outputList = list()
         samplesData = self.get_info()["samples"]
         from elevenlabslib.ElevenLabsSample import ElevenLabsSample
