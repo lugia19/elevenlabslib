@@ -222,11 +222,18 @@ class ElevenLabsVoice:
 
     def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1"):
+                                  onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0):
         """
 
         Note:
-            No longer suffers from the skipping issues it had in the past.
+            The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
+
+            The levels are as follows:
+                - 0: Normal, no optimizations applied
+                - 1: 50% of possible latency optimization
+                - 2: 75% of possible latency optimization
+                - 3: 100% of possible latency optimization
+                - 4: 100% + text normalizer disabled (best latency but can mispronounce numbers/dates)
 
         Generate audio bytes from the given prompt and stream them using sounddevice.
 
@@ -241,12 +248,13 @@ class ElevenLabsVoice:
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
+            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply.
 
         """
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         path = "/text-to-speech/" + self._voiceID + "/stream"
 
-        streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True)
+        streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency":latencyOptimizationLevel})
 
         streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
