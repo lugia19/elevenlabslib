@@ -216,6 +216,20 @@ class ElevenLabsUser:
         for value in historyData["history"]:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
+
+    def get_history_item(self, historyItemID) -> ElevenLabsHistoryItem:
+        """
+        Args:
+            historyItemID: The HistoryItem ID.
+
+        Returns:
+            ElevenLabsHistoryItem: The corresponding ElevenLabsHistoryItem
+        """
+        response = _api_get(f"/history/{historyItemID}", headers=self._headers)
+        historyData = response.json()
+        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+        return ElevenLabsHistoryItem(historyData, self)
+
     def download_history_items(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[str, bytes]:
         """
             Download multiple history items and return a dictionary where the key is the history ID
