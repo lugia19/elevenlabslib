@@ -12,21 +12,21 @@ import os
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
 
-def _api_call(requestType, path, headers, jsonData=None, filesData=None) -> requests.Response:
+def _api_call(requestType, path, headers, jsonData=None, filesData=None, stream=False) -> requests.Response:
     if path[0] != "/":
         path = "/"+path
 
     if requestType == "get":
         response = requests.get(api_endpoint + path, headers=headers)
     elif requestType == "json":
-        response = requests.post(api_endpoint + path, headers=headers, json=jsonData)
+        response = requests.post(api_endpoint + path, headers=headers, json=jsonData, stream=stream)
     elif requestType == "del":
         response = requests.delete(api_endpoint + path, headers=headers)
     elif requestType == "multipart":
         if filesData is not None:
-            response = requests.post(api_endpoint + path, headers=headers, data=jsonData, files=filesData)
+            response = requests.post(api_endpoint + path, headers=headers, data=jsonData, files=filesData, stream=stream)
         else:
-            response = requests.post(api_endpoint + path, headers=headers, data=jsonData)
+            response = requests.post(api_endpoint + path, headers=headers, data=jsonData, stream=stream)
     else:
         raise ValueError("Unknown API call type!")
 
@@ -43,10 +43,10 @@ def _api_get(path, headers) -> requests.Response:
 def _api_del(path, headers) -> requests.Response:
     return _api_call("del",path, headers)
 
-def _api_json(path, headers, jsonData) -> requests.Response:
-    return _api_call("json",path, headers, jsonData)
+def _api_json(path, headers, jsonData, stream=False) -> requests.Response:
+    return _api_call("json",path, headers, jsonData, stream)
 
-def _api_multipart(path, headers, data=None, filesData=None):
+def _api_multipart(path, headers, data=None, filesData=None, stream=False):
     return _api_call("multipart", path, headers, data, filesData)
 
 def _pretty_print_POST(res:requests.Response):
@@ -81,6 +81,11 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
     if portaudioDeviceID is None:
         portaudioDeviceID = sd.default.device[1]
 
+    #Let's make sure the user didn't just forward the tuple from one of the generation functions...
+    if isinstance(audioData, tuple):
+        if isinstance(audioData[0], bytes):
+            audioData = audioData[0]
+
     playbackWrapper = _SDPlaybackWrapper(audioData, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
     if not playInBackground:
@@ -99,6 +104,10 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
             saveLocation: The path (or file-like object) where the data will be saved.
             outputFormat: The format in which the audio will be saved
         """
+    if isinstance(audioData, tuple):
+        if isinstance(audioData[0], bytes):
+            audioData = audioData[0]
+
     tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
 
     if isinstance(saveLocation, str):
