@@ -1,6 +1,6 @@
 # Usage examples
 
-## Play back and save generated audio
+## Play back, save and delete generated audio
 
 ```python
 from elevenlabslib.helpers import *
@@ -10,11 +10,14 @@ api_key = "INSERT KEY HERE"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
-#Generate the audio bytes. Setting stability here only overrides it for this generation.
-audioData = premadeVoice.generate_and_play_audio("This is a test.", stability=0.4, playInBackground=False)
+#Generate the audio and get the bytes and historyID. Setting stability here only overrides it for this generation.
+generationData = premadeVoice.generate_play_audio("This is a test.", stability=0.4, playInBackground=False)
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
-save_audio_bytes(audioData, "testAudio.ogg", outputFormat="ogg")
+save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
+
+#Get the corresponding historyItem and delete it
+historyItem = user.get_history_item(generationData[1]).delete()
 ```
 
 ## Create a voice using Voice Design
@@ -82,8 +85,8 @@ user = ElevenLabsUser(api_key)
 
 #Generate two items to be deleted later
 premadeVoice = user.get_voices_by_name("Rachel")[0]
-premadeVoice.generate_audio_bytes("Test.")
-premadeVoice.generate_audio_bytes("Test.")
+premadeVoice.generate_audio("Test.")
+premadeVoice.generate_audio("Test.")
 
 #Find them, download them then delete them.
 testItems = list()
