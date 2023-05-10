@@ -240,7 +240,7 @@ class ElevenLabsVoice:
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
 
         Returns:
-            The audio bytes.
+           A tuple consisting of the bytes of the audio file and its historyID.
         """
         audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id)
         play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
