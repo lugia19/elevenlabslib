@@ -8,9 +8,6 @@ class ElevenLabsHistoryItem:
     """
     Represents a previously generated audio.
 
-    Note:
-        There is no way to get an instance of ElevenLabsHistoryItem from a historyID, as there is no endpoint that returns that information.
-
     Tip:
         There is no method to get an ElevenLabsVoice object for the voice that was used to create the file as it may not exist anymore.
         You can use the voiceID for that.
@@ -31,6 +28,8 @@ class ElevenLabsHistoryItem:
         self._dateUnix = data["date_unix"]
         self._characterCountChangeFrom = data["character_count_change_from"]
         self._characterCountChangeTo = data["character_count_change_to"]
+        self._settingsUsed = data["settings"]
+        self._feedbackData = data["feedback"]
         self._fullMetadata = data
         self._audioData = None
 
@@ -40,6 +39,13 @@ class ElevenLabsHistoryItem:
         All the metadata associated with the item.
         """
         return self._fullMetadata
+
+    @property
+    def settings_used(self):
+        """
+        The settings used for this generation.
+        """
+        return self._settingsUsed
 
     @property
     def historyID(self):
