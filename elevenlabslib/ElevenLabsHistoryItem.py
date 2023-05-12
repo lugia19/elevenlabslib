@@ -148,7 +148,11 @@ class ElevenLabsHistoryItem:
             thumbsUp: Whether or not to rate the generation positively.
             feedbackText: Any text you'd like to add as feedback. Only sent if thumbsUp is true, in which case it must be at least 50 characters.
             issueTypes: A list of types of issues this generation falls under. Only sent if thumbsUp is false.
-            The valid values are: emotions, inaccurate_clone, glitches, audio_quality, other. Other values will be ignored.
+
+        Note:
+            The valid values for issueTypes are: emotions, inaccurate_clone, glitches, audio_quality, other
+
+            Other values will be ignored.
         """
         payload = {
             "thumbs_up":thumbsUp,
