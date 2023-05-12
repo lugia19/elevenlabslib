@@ -12,24 +12,14 @@ import os
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
 
-def _api_call(requestType, path, headers, jsonData=None, filesData=None, stream=False) -> requests.Response:
+def _api_call_v2(requestMethod, argsDict) -> requests.Response:
+    path = argsDict["path"]
     if path[0] != "/":
         path = "/"+path
+    argsDict["url"] = api_endpoint + path
+    argsDict.pop("path")
 
-    if requestType == "get":
-        response = requests.get(api_endpoint + path, headers=headers)
-    elif requestType == "json":
-        response = requests.post(api_endpoint + path, headers=headers, json=jsonData, stream=stream)
-    elif requestType == "del":
-        response = requests.delete(api_endpoint + path, headers=headers)
-    elif requestType == "multipart":
-        if filesData is not None:
-            response = requests.post(api_endpoint + path, headers=headers, data=jsonData, files=filesData, stream=stream)
-        else:
-            response = requests.post(api_endpoint + path, headers=headers, data=jsonData, stream=stream)
-    else:
-        raise ValueError("Unknown API call type!")
-
+    response:requests.Response = requestMethod(**argsDict)
     try:
         response.raise_for_status()
         return response
@@ -37,17 +27,39 @@ def _api_call(requestType, path, headers, jsonData=None, filesData=None, stream=
         _pretty_print_POST(response)
         raise e
 
-def _api_get(path, headers) -> requests.Response:
-    return _api_call("get",path, headers)
-
+def _api_get(path, headers, stream=False) -> requests.Response:
+    args = {
+        "path":path,
+        "headers":headers,
+        "stream":stream
+    }
+    return _api_call_v2(requests.get, args)
 def _api_del(path, headers) -> requests.Response:
-    return _api_call("del",path, headers)
-
+    args = {
+        "path": path,
+        "headers": headers
+    }
+    return _api_call_v2(requests.delete, args)
 def _api_json(path, headers, jsonData, stream=False) -> requests.Response:
-    return _api_call("json",path, headers, jsonData, stream)
+    args = {
+        "path":path,
+        "headers":headers,
+        "json":jsonData,
+        "stream":stream
+    }
+    return _api_call_v2(requests.post, args)
 
-def _api_multipart(path, headers, data=None, filesData=None, stream=False):
-    return _api_call("multipart", path, headers, data, filesData)
+def _api_multipart(path, headers, data, filesData=None, stream=False):
+    args = {
+        "path":path,
+        "headers":headers,
+        "stream":stream,
+        "data":data
+    }
+    if filesData is not None:
+        args["files"] = filesData
+
+    return _api_call_v2(requests.post, args)
 
 def _pretty_print_POST(res:requests.Response):
     req = res.request

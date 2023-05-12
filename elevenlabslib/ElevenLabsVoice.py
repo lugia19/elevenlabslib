@@ -192,7 +192,7 @@ class ElevenLabsVoice:
 
         return response.headers["history-item-id"]
 
-    def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1") -> tuple[bytes,str]:
+    def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
         """
         Generates speech for the given prompt and returns the audio data as bytes of an mp3 file alongside the new historyID.
 
@@ -204,6 +204,7 @@ class ElevenLabsVoice:
             stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
             similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
+            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
         Returns:
             A tuple consisting of the bytes of the audio file and its historyID.
 
@@ -221,7 +222,7 @@ class ElevenLabsVoice:
         return response.content
     def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1") -> tuple[bytes,str]:
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -238,11 +239,11 @@ class ElevenLabsVoice:
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-
+            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
         Returns:
            A tuple consisting of the bytes of the audio file and its historyID.
         """
-        audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id)
+        audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id, latencyOptimizationLevel)
         play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return audioData, historyID
 

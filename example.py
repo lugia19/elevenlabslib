@@ -76,9 +76,9 @@ def main():
         newGeneratedVoice.edit_settings(stability, similarityBoost)
         try:
             # Generate an output:
-            newGeneratedVoice.generate_and_play_audio("Test.", playInBackground=False)
+            newGeneratedVoice.generate_play_audio("Test.", playInBackground=False)
             # Generate an output overwriting the stability and/or similarity setting for this generation:
-            newGeneratedVoice.generate_and_play_audio("Test.", stability=0.3, playInBackground=True)
+            newGeneratedVoice.generate_play_audio("Test.", stability=0.3, playInBackground=True)
         except requests.exceptions.RequestException:
             print("Couldn't generate output, likely out of tokens.")
 
@@ -162,7 +162,7 @@ def main():
     premadeVoice:ElevenLabsVoice = user.get_voices_by_name("Rachel")[0]
     try:
         #Playback in normal mode, waiting for the whole file to be downloaded before playing it back.
-        premadeVoice.generate_and_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)
+        premadeVoice.generate_play_audio("Test.", playInBackground=False, portaudioDeviceID=6)
 
         #Playback with streaming (without waiting for the whole file to be downloaded, so with a faster response time)
         #Additionally, the second one will begin downloading while the first one is still playing, but will only start playing once the first is done.
@@ -176,7 +176,7 @@ def main():
         secondPlaybackEnded.wait()
 
         #Generate a sample and save it to disk, then play it back.
-        mp3Data = premadeVoice.generate_audio_bytes("Test.")
+        mp3Data = premadeVoice.generate_audio("Test.")[0]
         save_audio_bytes(mp3Data, "test.wav","wav")
         play_audio_bytes(open("test.wav","rb").read(),False,6)
 
@@ -193,7 +193,7 @@ def main():
     premadeVoice.linkedUser = newUser
 
     try:
-        premadeVoice.generate_and_play_audio("Test.",playInBackground=False)
+        premadeVoice.generate_play_audio("Test.",playInBackground=False)
     except requests.exceptions.RequestException:
         print("Couldn't generate an output, likely out of tokens.")
 
