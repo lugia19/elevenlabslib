@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import requests
+
 from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
@@ -29,8 +32,8 @@ class ElevenLabsHistoryItem:
         self._characterCountChangeFrom = data["character_count_change_from"]
         self._characterCountChangeTo = data["character_count_change_to"]
         self._settingsUsed = data["settings"]
-        self._feedbackData = data["feedback"]
         self._fullMetadata = data
+        self._fullMetadata.pop("feedback")  #We don't want to expose the initial feedbackData, as that can change.
         self._audioData = None
 
     @property
@@ -129,6 +132,43 @@ class ElevenLabsHistoryItem:
         """
         play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return
+
+    def fetch_feedback(self):
+        """
+        Fetches the feedback information associated with this generation.
+        """
+        response = _api_get(f"/history/{self.historyID}", headers=self._parentUser.headers)
+        return response.json()["feedback"]
+
+    def edit_feedback(self, thumbsUp:bool, feedbackText:str="", issueTypes:list[str] = None):
+        """
+        Allows you to leave feedback for this generation.
+
+        Args:
+            thumbsUp: Whether or not to rate the generation positively.
+            feedbackText: Any text you'd like to add as feedback. Only sent if thumbsUp is true, in which case it must be at least 50 characters.
+            issueTypes: A list of types of issues this generation falls under. Only sent if thumbsUp is false.
+            The valid values are: emotions, inaccurate_clone, glitches, audio_quality, other. Other values will be ignored.
+        """
+        payload = {
+            "thumbs_up":thumbsUp,
+            "feedback":""
+        }
+
+        validIssueTypes = ["emotions", "inaccurate_clone", "glitches", "audio_quality", "other"]
+        for issueType in validIssueTypes:
+            if issueTypes and issueType in issueTypes and not thumbsUp:
+                payload[issueType] = True
+            else:
+                payload[issueType] = False
+
+        if thumbsUp:
+            if len(feedbackText) < 50:
+                raise ValueError("Error! Positive feedback text must be at least 50 characters!")
+            payload["feedback"] = feedbackText
+
+        response = _api_json(f"/history/{self.historyID}/feedback", headers=self._parentUser.headers, jsonData=payload)
+        return response
 
     def delete(self):
         """

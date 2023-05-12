@@ -1,6 +1,6 @@
 # Usage examples
 
-## Play back, save and delete generated audio
+## Play back, save, rate and delete generated audio
 
 ```python
 from elevenlabslib.helpers import *
@@ -16,8 +16,14 @@ generationData = premadeVoice.generate_play_audio("This is a test.", stability=0
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
 save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
 
-#Get the corresponding historyItem and delete it
-historyItem = user.get_history_item(generationData[1]).delete()
+#Fetch the corresponding historyItem
+historyItem = user.get_history_item(generationData[1])
+
+#Rate it
+historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech service works very well!")
+
+#Delete it
+historyItem.delete()
 ```
 
 ## Create a voice using Voice Design
