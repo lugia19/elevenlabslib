@@ -120,7 +120,7 @@ class ElevenLabsHistoryItem:
         return self._audioData
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
         """
         Plays the audio associated with the history item.
 
@@ -129,9 +129,11 @@ class ElevenLabsHistoryItem:
             portaudioDeviceID: an optional integer representing the portaudio device ID to use
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
+
+        Returns:
+            The sounddevice OutputStream of the playback.
         """
-        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return
+        return play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
     def fetch_feedback(self):
         """
@@ -153,6 +155,10 @@ class ElevenLabsHistoryItem:
             The valid values for issueTypes are: emotions, inaccurate_clone, glitches, audio_quality, other
 
             Other values will be ignored.
+
+        Caution:
+            You CANNOT add positive feedback to items that are "too long". I'm afraid there's no specified maximum duration.
+            If an item is too long, a ValueError will be thrown.
         """
         payload = {
             "thumbs_up":thumbsUp,
@@ -170,8 +176,22 @@ class ElevenLabsHistoryItem:
             if len(feedbackText) < 50:
                 raise ValueError("Error! Positive feedback text must be at least 50 characters!")
             payload["feedback"] = feedbackText
-
-        response = _api_json(f"/history/{self.historyID}/feedback", headers=self._parentUser.headers, jsonData=payload)
+        try:
+            response = _api_json(f"/history/{self.historyID}/feedback", headers=self._parentUser.headers, jsonData=payload)
+        except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
+            try:
+                responseJson = e.response.json()
+                responseStatus = responseJson["detail"]["status"]
+                responseMessage = responseJson["detail"]["message"]
+                # If those keys aren't present it'll error out and raise e anyway.
+            except:
+                raise e
+            if responseStatus == "invalid_feedback" and "Positive feedback can be specified only for short audio" in responseMessage:
+                logging.error("This audio is too long to add positive feedback text, re-sending feedback without the text.")
+                payload["feedback"] = ""
+                response = _api_json(f"/history/{self.historyID}/feedback", headers=self._parentUser.headers, jsonData=payload)
+            else:
+                raise e
         return response
 
     def delete(self):

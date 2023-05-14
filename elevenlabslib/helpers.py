@@ -75,7 +75,7 @@ def _pretty_print_POST(res:requests.Response):
 
 
 def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
     """
     Plays the given audio and calls the given functions.
     
@@ -105,6 +105,7 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
             playbackWrapper.endPlaybackEvent.wait()
     else:
         playbackWrapper.stream.start()
+        return playbackWrapper.stream
 
 def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
     """

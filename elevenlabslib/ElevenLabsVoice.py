@@ -222,7 +222,7 @@ class ElevenLabsVoice:
         return response.content
     def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str, sd.OutputStream]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -241,11 +241,11 @@ class ElevenLabsVoice:
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
             latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
         Returns:
-           A tuple consisting of the bytes of the audio file and its historyID.
+           A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
         """
         audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id, latencyOptimizationLevel)
-        play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return audioData, historyID
+        outputStream = play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+        return audioData, historyID, outputStream
 
     def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
@@ -327,7 +327,7 @@ class ElevenLabsVoice:
         return response.content
 
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
+                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
         """
         Plays the preview audio.
 
@@ -338,11 +338,11 @@ class ElevenLabsVoice:
         	onPlaybackEnd: Function to call once the playback ends
 
         Returns:
-            None
+            The sounddevice OutputStream of the playback.
         """
 
-        play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return
+        return play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+
 
     @property
     def category(self):

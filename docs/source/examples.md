@@ -1,17 +1,22 @@
 # Usage examples
 
-## Play back, save, rate and delete generated audio
+## Play back, stop, save, rate and delete generated audio
 
 ```python
 from elevenlabslib.helpers import *
 from elevenlabslib import *
+import time
 
 api_key = "INSERT KEY HERE"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 #Generate the audio and get the bytes and historyID. Setting stability here only overrides it for this generation.
-generationData = premadeVoice.generate_play_audio("This is a test.", stability=0.4, playInBackground=False)
+generationData = premadeVoice.generate_play_audio("This is a test.", stability=0.4, playInBackground=True)
+
+#Sleep for 0.5 second
+time.sleep(0.5)
+generationData[2].stop()
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
 save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")

@@ -61,7 +61,7 @@ class ElevenLabsSample:
         return self._audioData
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> None:
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
         """
         Downloads and plays the audio associated with the sample.
 
@@ -71,8 +71,8 @@ class ElevenLabsSample:
             onPlaybackStart: Function to call once the playback begins
             onPlaybackEnd: Function to call once the playback ends
         """
-        play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return
+        return play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+
 
     def delete(self):
         """
