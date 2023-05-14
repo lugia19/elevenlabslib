@@ -33,7 +33,9 @@ class ElevenLabsUser:
             ValueError: If the API Key is invalid.
         """
         self._xi_api_key = xi_api_key
-        self._headers = default_headers
+        self._headers = dict()
+        for key, value in default_headers.items():
+            self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
 
         try:

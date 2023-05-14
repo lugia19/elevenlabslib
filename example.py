@@ -200,18 +200,22 @@ def main():
 
 
     #Get, download and delete all the test generations
-    testItems = list()
+    testItems = dict()
 
     for account in [user, newUser]:
-        for historyItem in account.get_history_items():
+        testItems[account] = list()
+        allItems = account.get_history_items()
+        for historyItem in allItems:
             if historyItem.text == "Test.":
-                testItems.append(historyItem)
+                testItems[account].append(historyItem)
 
-    downloadedItems = user.download_history_items(testItems)
+    downloadedItems = user.download_history_items(testItems[user])
+    downloadedItems2 = newUser.download_history_items(testItems[newUser])
 
     # Delete them
-    for item in testItems:
-        item.delete()
+    for account in [user, newUser]:
+        for item in testItems[account]:
+            item.delete()
 
 
 def getNumber(prompt, minValue, maxValue) -> int:
