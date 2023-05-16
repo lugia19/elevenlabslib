@@ -33,6 +33,8 @@ def _api_get(path, headers, stream=False, params=None) -> requests.Response:
         "headers":headers,
         "stream":stream
     }
+    if params is not None:
+        args["params"] = params
     return _api_call_v2(requests.get, args)
 def _api_del(path, headers) -> requests.Response:
     args = {
@@ -47,6 +49,8 @@ def _api_json(path, headers, jsonData, stream=False, params=None) -> requests.Re
         "json":jsonData,
         "stream":stream
     }
+    if params is not None:
+        args["params"] = params
     return _api_call_v2(requests.post, args)
 
 def _api_multipart(path, headers, data, filesData=None, stream=False, params=None):
