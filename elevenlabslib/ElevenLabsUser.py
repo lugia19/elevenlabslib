@@ -3,6 +3,7 @@ import io
 import zipfile
 
 from typing import TYPE_CHECKING, BinaryIO, Union
+from warnings import warn
 
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
@@ -207,10 +208,7 @@ class ElevenLabsUser:
         return matchingVoices
 
     def get_history_items(self) -> list[ElevenLabsHistoryItem]:
-        """
-        Returns:
-            list[ElevenLabsHistoryItem]: A list containing all of the user's history items.
-        """
+        warn("This function is deprecated. Please use get_history_items_paginated() instead, which uses pagination.", DeprecationWarning)
         outputList = list()
         response = _api_get("/history", headers=self._headers)
         historyData = response.json()
@@ -218,6 +216,29 @@ class ElevenLabsUser:
         for value in historyData["history"]:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
+
+
+    def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem:str|ElevenLabsHistoryItem=None) -> list[ElevenLabsHistoryItem]:
+        """
+        This function returns numberOfItems history items, starting from the newest (or the one specified with startAfterHistoryItem) and returning older ones.
+
+        Args:
+            maxNumberOfItems (int): The maximum number of history items to return.
+            startAfterHistoryItem (str|ElevenLabsHistoryItem): The history item (or its ID) from which to start returning items.
+        Returns:
+            list[ElevenLabsHistoryItem]: A list containing the requested history items.
+        """
+
+        #TODO: Make this workable.
+
+        outputList = list()
+        response = _api_get("/history", headers=self._headers)
+        historyData = response.json()
+        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+        for value in historyData["history"]:
+            outputList.append(ElevenLabsHistoryItem(value, self))
+        return outputList
+
 
     def get_history_item(self, historyItemID) -> ElevenLabsHistoryItem:
         """
@@ -232,18 +253,44 @@ class ElevenLabsUser:
         from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
         return ElevenLabsHistoryItem(historyData, self)
 
-    def download_history_items(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[str, bytes]:
+    def download_history_items_v2(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[ElevenLabsHistoryItem, tuple[bytes, str]]:
         """
-            Download multiple history items and return a dictionary where the key is the history ID
-            and the value is the bytes of the mp3 file.
+        Download multiple history items and return a dictionary where the key is the ElevenLabsHistoryItem and the value is a tuple consisting of the bytes of the audio and its filename.
 
-            Args:
-                historyItems (list[str|ElevenLabsHistoryItem]): List of history items (or their IDs) to download.
+        Args:
+            historyItems (list[str|ElevenLabsHistoryItem]): List of history items (or their IDs) to download.
 
-            Returns:
-                dict[str, bytes]: Dictionary where the key is the history ID and the value is the bytes of the mp3 file.
-            """
+        Returns:
+            dict[ElevenLabsHistoryItem, bytes]: Dictionary where the key is the historyItem and the value is a tuple of the bytes of the mp3 file and its filename.
+        """
+        historyItemIDs = list()
+        for index, item in enumerate(historyItems):
+            if isinstance(item, str):
+                historyItemIDs.append(item)
+                historyItems[index] = self.get_history_item(item)
+            else:
+                historyItemIDs.append(item.historyID)
 
+        payload = {"history_item_ids": historyItemIDs}
+        response = _api_json("/history/download", headers=self._headers, jsonData=payload)
+
+        if len(historyItemIDs) == 1:
+            downloadedHistoryItems = {historyItemIDs[0]: response.content}
+        else:
+            downloadedHistoryItems = {}
+            downloadedZip = zipfile.ZipFile(io.BytesIO(response.content))
+            # Extract all files and add them to the dict.
+            for filePath in downloadedZip.namelist():
+                fileName = filePath[filePath.index("/")+1:]
+                historyID = fileName[fileName.rindex("_")+1:fileName.rindex(".")]
+                originalHistoryItem = historyItems[historyItemIDs.index(historyID)]
+                assert originalHistoryItem.historyID == historyID
+                downloadedHistoryItems[originalHistoryItem] = (downloadedZip.read(filePath), fileName)
+
+        return downloadedHistoryItems
+
+    def download_history_items(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[str, bytes]:
+        warn("This function is deprecated, please use download_history_items_v2 instead.", DeprecationWarning)
         historyItemIDs = list()
         for item in historyItems:
             if isinstance(item, str):
@@ -261,9 +308,7 @@ class ElevenLabsUser:
             downloadedZip = zipfile.ZipFile(io.BytesIO(response.content))
             #Extract all files and add them to the dict.
             for fileName in downloadedZip.namelist():
-                historyID = fileName[:fileName.rindex(".")]
-                if "/" in historyID:
-                    historyID = historyID[historyID.find("/") + 1:]
+                historyID = fileName[fileName.rindex("_") + 1:fileName.rindex(".")]
                 downloadedHistoryItems[historyID] = downloadedZip.read(fileName)
 
         return downloadedHistoryItems

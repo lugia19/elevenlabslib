@@ -93,10 +93,12 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
     if portaudioDeviceID is None:
         portaudioDeviceID = sd.default.device[1]
 
-    #Let's make sure the user didn't just forward the tuple from one of the generation functions...
+    #Let's make sure the user didn't just forward a tuple from one of the other functions...
     if isinstance(audioData, tuple):
-        if isinstance(audioData[0], bytes):
-            audioData = audioData[0]
+        for item in audioData:
+            if isinstance(item,bytes):
+                audioData = item
+
 
     playbackWrapper = _SDPlaybackWrapper(audioData, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
 
@@ -117,9 +119,12 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
             saveLocation: The path (or file-like object) where the data will be saved.
             outputFormat: The format in which the audio will be saved
         """
+
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
     if isinstance(audioData, tuple):
-        if isinstance(audioData[0], bytes):
-            audioData = audioData[0]
+        for item in audioData:
+            if isinstance(item, bytes):
+                audioData = item
 
     tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
 
