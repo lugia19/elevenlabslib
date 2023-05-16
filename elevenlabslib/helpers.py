@@ -27,7 +27,7 @@ def _api_call_v2(requestMethod, argsDict) -> requests.Response:
         _pretty_print_POST(response)
         raise e
 
-def _api_get(path, headers, stream=False) -> requests.Response:
+def _api_get(path, headers, stream=False, params=None) -> requests.Response:
     args = {
         "path":path,
         "headers":headers,
@@ -40,7 +40,7 @@ def _api_del(path, headers) -> requests.Response:
         "headers": headers
     }
     return _api_call_v2(requests.delete, args)
-def _api_json(path, headers, jsonData, stream=False) -> requests.Response:
+def _api_json(path, headers, jsonData, stream=False, params=None) -> requests.Response:
     args = {
         "path":path,
         "headers":headers,
@@ -49,7 +49,7 @@ def _api_json(path, headers, jsonData, stream=False) -> requests.Response:
     }
     return _api_call_v2(requests.post, args)
 
-def _api_multipart(path, headers, data, filesData=None, stream=False):
+def _api_multipart(path, headers, data, filesData=None, stream=False, params=None):
     args = {
         "path":path,
         "headers":headers,
@@ -58,6 +58,8 @@ def _api_multipart(path, headers, data, filesData=None, stream=False):
     }
     if filesData is not None:
         args["files"] = filesData
+    if params is not None:
+        args["params"] = params
 
     return _api_call_v2(requests.post, args)
 

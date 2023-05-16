@@ -210,7 +210,8 @@ class ElevenLabsVoice:
 
         """
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
-        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
+        params = {"optimize_streaming_latency":latencyOptimizationLevel}
+        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
 
         return response.content, response.headers["history-item-id"]
     def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> bytes:
