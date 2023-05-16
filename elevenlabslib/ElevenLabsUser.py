@@ -209,13 +209,7 @@ class ElevenLabsUser:
 
     def get_history_items(self) -> list[ElevenLabsHistoryItem]:
         warn("This function is deprecated. Please use get_history_items_paginated() instead, which uses pagination.", DeprecationWarning)
-        outputList = list()
-        response = _api_get("/history", headers=self._headers)
-        historyData = response.json()
-        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
-        for value in historyData["history"]:
-            outputList.append(ElevenLabsHistoryItem(value, self))
-        return outputList
+        return self.get_history_items_paginated(maxNumberOfItems=-1)
 
 
     def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem:str|ElevenLabsHistoryItem=None) -> list[ElevenLabsHistoryItem]:
@@ -223,18 +217,46 @@ class ElevenLabsUser:
         This function returns numberOfItems history items, starting from the newest (or the one specified with startAfterHistoryItem) and returning older ones.
 
         Args:
-            maxNumberOfItems (int): The maximum number of history items to return.
+            maxNumberOfItems (int): The maximum number of history items to get. A value of 0 or less means all of them.
             startAfterHistoryItem (str|ElevenLabsHistoryItem): The history item (or its ID) from which to start returning items.
         Returns:
             list[ElevenLabsHistoryItem]: A list containing the requested history items.
         """
 
-        #TODO: Make this workable.
+        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+        params = {}
+
+        if startAfterHistoryItem is not None:
+            if isinstance(startAfterHistoryItem, ElevenLabsHistoryItem):
+                startAfterHistoryItem = startAfterHistoryItem.historyID
+            params["start_after_history_item_id"] = startAfterHistoryItem
 
         outputList = list()
-        response = _api_get("/history", headers=self._headers)
+        singleRequestLimit = 1000
+
+        downloadAll = maxNumberOfItems <= 0
+
+        #While it's over the limit OR the user wants to download all items.
+        while maxNumberOfItems > singleRequestLimit or downloadAll:
+            maxNumberOfItems -= singleRequestLimit
+            #Let's download limit amount of items and append them to the list
+            params["page_size"] = singleRequestLimit
+            response = _api_get("/history", headers=self._headers, params=params)
+            historyData = response.json()
+            for value in historyData["history"]:
+                outputList.append(ElevenLabsHistoryItem(value, self))
+            #We got back at most singleRequestLimit items.
+            params["start_after_history_item_id"] = historyData["last_history_item_id"]
+
+            #In case we're done early.
+            if not historyData["has_more"]:
+                return outputList
+
+        params["page_size"] = maxNumberOfItems
+        response = _api_get("/history", headers=self._headers, params=params)
+
         historyData = response.json()
-        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+
         for value in historyData["history"]:
             outputList.append(ElevenLabsHistoryItem(value, self))
         return outputList
