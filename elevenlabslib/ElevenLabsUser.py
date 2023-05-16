@@ -285,6 +285,7 @@ class ElevenLabsUser:
         Returns:
             dict[ElevenLabsHistoryItem, bytes]: Dictionary where the key is the historyItem and the value is a tuple of the bytes of the mp3 file and its filename.
         """
+
         historyItemIDs = list()
         for index, item in enumerate(historyItems):
             if isinstance(item, str):
@@ -292,6 +293,9 @@ class ElevenLabsUser:
                 historyItems[index] = self.get_history_item(item)
             else:
                 historyItemIDs.append(item.historyID)
+
+        if len(historyItemIDs) == 1:
+            historyItemIDs.append(historyItemIDs[0])
 
         payload = {"history_item_ids": historyItemIDs}
         response = _api_json("/history/download", headers=self._headers, jsonData=payload)
@@ -307,7 +311,8 @@ class ElevenLabsUser:
                 historyID = fileName[fileName.rindex("_")+1:fileName.rindex(".")]
                 originalHistoryItem = historyItems[historyItemIDs.index(historyID)]
                 assert originalHistoryItem.historyID == historyID
-                downloadedHistoryItems[originalHistoryItem] = (downloadedZip.read(filePath), fileName)
+                if not originalHistoryItem in downloadedHistoryItems:   #Avoid re-reading duplicates from the zip file.
+                    downloadedHistoryItems[originalHistoryItem] = (downloadedZip.read(filePath), fileName)
 
         return downloadedHistoryItems
 

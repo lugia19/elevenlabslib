@@ -100,17 +100,18 @@ premadeVoice.generate_audio("Test.")
 premadeVoice.generate_audio("Test.")
 
 #Find them, download them then delete them.
+#Note - I'm assuming they're within the last 10 generations, since they were just created.
 testItems = list()
-for historyItem in user.get_history_items():
+for historyItem in user.get_history_items_paginated(maxNumberOfItems=10):
     if historyItem.text == "Test.":
         testItems.append(historyItem)
 
 #Download them
-downloadedItems = user.download_history_items(testItems)
+downloadedItems = user.download_history_items_v2(testItems)
 
 #Play them back
-for historyID, audioData in downloadedItems.items():
-    play_audio_bytes(audioData, playInBackground=False)
+for historyID, downloadDataTuple in downloadedItems.items():
+    play_audio_bytes(downloadDataTuple[0], playInBackground=False)
 
 #Delete them
 for item in testItems:
