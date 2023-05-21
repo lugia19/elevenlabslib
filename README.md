@@ -5,6 +5,14 @@
 
 Python wrapper for the full elevenlabs API.
 
+### NOTE: There's now an official wrapper, but this project will continue to be maintained.
+
+The main reason is the different approach to playback. By doing playback purely within python instead of piping to an external process, there are a couple of important extra things that can be done, such as:
+- Playback on a specific output device
+- Running functions exactly when the playback begins and ends
+- Controlling the playback from within python
+
+
 ### **Documentation now available at https://elevenlabslib.readthedocs.io/en/latest/**
 
 # Installation
