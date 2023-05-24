@@ -590,7 +590,7 @@ class _AudioChunkStreamer:
                                 self._q.put(data)
                             break
                         else:
-                            logging.critical("We're not at the end, yet we recieved less data than expected. THIS SHOULD NOT HAPPEN.")
+                            logging.error("We're not at the end, yet we recieved less data than expected. THIS SHOULD NOT HAPPEN.")
             logging.debug("While loop done.")
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
@@ -604,8 +604,8 @@ class _AudioChunkStreamer:
         totalLength = 0
         logging.debug("Starting iter...")
         for chunk in streamedResponse.iter_content(chunk_size=_downloadChunkSize):
-            if self._events["headerReadyEvent"].is_set():
-                logging.debug("HeaderReady is set, waiting for the soundfile...")
+            if self._events["headerReadyEvent"].is_set() and not self._events["soundFileReadyEvent"].is_set():
+                logging.debug("HeaderReady is set, but waiting for the soundfile...")
                 self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
                 if not self._events["headerReadyEvent"].is_set():
                     logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
@@ -644,9 +644,12 @@ class _AudioChunkStreamer:
 
         while True:
             try:
-                readData = self._q.get_nowait()
+                if self._events["downloadDoneEvent"].is_set():
+                    readData = self._q.get_nowait()
+                else:
+                    readData = self._q.get(timeout=5)    #Download isn't over so we may have to wait.
                 if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
-                    logging.debug("An empty item got into the queue. Skip it.")
+                    logging.error("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
                     continue
                 break
             except queue.Empty as e:
@@ -654,8 +657,7 @@ class _AudioChunkStreamer:
                     logging.debug("Download (and playback) finished.")  # We're done.
                     raise sd.CallbackStop
                 else:
-                    # This should NEVER happen, as the getdownloaddata function handles waiting for new data to come in. ABORT.
-                    logging.debug("Missing data but download isn't over. What the fuck?")
+                    logging.critical("Could not get an item within the timeout. Abort.")
                     raise sd.CallbackAbort
         #We've read an item from the queue.
 
@@ -667,10 +669,7 @@ class _AudioChunkStreamer:
         # Last read chunk was smaller than it should've been. It's either EOF or that stupid soundFile bug.
         if 0 < len(readData) < len(outdata):
             logging.debug("Data read smaller than it should've been.")
-            logging.debug("Read " + str(len(readData)) + " bytes but expected " + str(len(outdata)) + ", padding...")
-
-            # I still don't really understand why this happens - seems to be related to the soundfile bug.
-            # Padding it like this means there ends up being a small portion of silence during the playback.
+            logging.debug(f"Read {len(readData)} bytes but expected {len(outdata)}, padding...")
 
             outdata[:len(readData)] = readData
             outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
@@ -683,14 +682,15 @@ class _AudioChunkStreamer:
                     logging.debug("EOF reached and download over! Stopping callback...")
                     raise sd.CallbackStop
                 else:
-                    logging.debug("...Read no data but the download isn't over, what the fuck? Panic. Just send silence.")
+                    logging.critical("...Read no data but the download isn't over? Panic. Just send silence.")
                     outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
         else:
             outdata[:] = readData
     #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
     def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=_defaultDType):
         readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-        logging.debug(f"Expected {dataToRead*self._frameSize} bytes, got back {len(readData)}")
+        if dataToRead * self._frameSize != len(readData):
+            logging.debug(f"Expected {dataToRead * self._frameSize} bytes, but got back {len(readData)}")
         if len(readData) < dataToRead * self._frameSize:
             logging.debug("Insufficient data read.")
             curPos = self._bytesFile.tell()
