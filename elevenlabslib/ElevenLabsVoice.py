@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import queue
 
 import threading
+from concurrent.futures import Future
 from typing import Optional, Tuple, Any
 from warnings import warn
 
@@ -256,9 +258,14 @@ class ElevenLabsVoice:
         play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return audioData
 
-    def generate_and_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
+    def generate_and_stream_audio(self, *args, **kwargs) -> str:
+        warn("This function is deprecated. Please use generate_stream_audio instead, which returns both the historyID and a future for the audio OutputStream (for playback control).")
+        return self.generate_stream_audio(*args, **kwargs)[0]
+
+    def generate_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
-                                  onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> str:
+                                  onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[
+        str, Future[Any]]:
         """
 
         Note:
@@ -287,7 +294,7 @@ class ElevenLabsVoice:
             latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply.
 
         Returns:
-            The historyID for the newly created item.
+            A tuple consisting of the historyID for the newly created item and a future which will hold the audio OutputStream (to control playback)
         """
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         path = "/text-to-speech/" + self._voiceID + "/stream"
@@ -295,14 +302,14 @@ class ElevenLabsVoice:
         streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency":latencyOptimizationLevel})
 
         streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-
+        audioStreamFuture = concurrent.futures.Future()
         if streamInBackground:
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse,))
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse,audioStreamFuture))
             mainThread.start()
         else:
-            streamer.begin_streaming(streamedResponse)
+            streamer.begin_streaming(streamedResponse,audioStreamFuture)
 
-        return streamedResponse.headers["history-item-id"]
+        return streamedResponse.headers["history-item-id"], audioStreamFuture
 
 
     def get_preview_url(self) -> str|None:
@@ -533,7 +540,7 @@ class _AudioChunkStreamer:
             "playbackStartFired": threading.Event()
         }
 
-    def begin_streaming(self, streamedResponse:requests.Response):
+    def begin_streaming(self, streamedResponse:requests.Response, future:concurrent.futures.Future):
         # Clean all the buffers and reset all events.
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
@@ -567,6 +574,7 @@ class _AudioChunkStreamer:
             samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
             device=self._deviceID, channels=self._bytesSoundFile.channels, dtype=_defaultDType,
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
+        future.set_result(stream)
         logging.debug("Starting playback...")
         with stream:
             while True:

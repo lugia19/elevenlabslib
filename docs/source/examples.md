@@ -1,22 +1,17 @@
 # Usage examples
 
-## Play back, stop, save, rate and delete generated audio
+## Play back, save and delete generated audio
 
 ```python
 from elevenlabslib.helpers import *
 from elevenlabslib import *
-import time
 
-api_key = "INSERT KEY HERE"
+api_key = "api_key"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 #Generate the audio and get the bytes and historyID. Setting stability here only overrides it for this generation.
 generationData = premadeVoice.generate_play_audio("This is a test.", stability=0.4, playInBackground=True)
-
-#Sleep for 0.5 second
-time.sleep(0.5)
-generationData[2].stop()
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
 save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
@@ -31,37 +26,95 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 historyItem.delete()
 ```
 
-## Create a voice using Voice Design
+## Control the background playback of an audio
+
 ```python
-from elevenlabslib.helpers import *
+import time
 from elevenlabslib import *
 
-api_key = "INSERT KEY HERE"
-newVoiceName = "newVoice"
+api_key = "api_key"
 user = ElevenLabsUser(api_key)
+voice = user.get_voices_by_name("Rachel")[0]
+usingStreaming = True
+if usingStreaming:
+    #The stream function uses a future rather than returing the audioStream directly.
+    audioStreamFuture = voice.generate_stream_audio("I am currently testing the playback control.", streamInBackground=True)[1]
+    audioStream = audioStreamFuture.result()
+else:
+    audioStream = voice.generate_play_audio("I am currently testing the playback control.", playInBackground=True)[1]
 
-try:
-    #Generate the audio and get the temporary voiceID.
-    temporaryVoiceID, generatedAudio = user.design_voice(gender="female", accent="american", age="young", accent_strength=1.0)
+#Wait for the thread to be active, then stop the playback.
+while not audioStream.active:
+    time.sleep(0.1)
     
-    #Play back the generated audio.
-    play_audio_bytes(generatedAudio, playInBackground=False)
-    
-    #Add the voice to the account.
-    newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, newVoiceName)
-    
-except requests.exceptions.RequestException:
-    print("Couldn't design voice, likely out of tokens or slots.")
-
+audioStream.abort()
 ```
 
+## Play back an audio on a specific output device
+```python
+from elevenlabslib import *
+import sounddevice
+import random
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+voice = user.get_voices_by_name("Rachel")[0]
+
+#Get all available output devices
+outputDevices = [device for device in sounddevice.query_devices() if device["max_output_channels"] > 0]
+
+#Print them all to console
+for device in outputDevices:
+    print(f"Device id {device['index']}: {device['name']}")
+
+#Choose one (randomly for this example) and use it.
+outputDevice = random.choice(outputDevices)
+print(f"Randomly chosen device: {outputDevice['name']}")
+
+#WARNING: Since we're choosing it randomly, it may be invalid and cause errors.
+voice.generate_stream_audio("Device output test.",portaudioDeviceID=outputDevice["index"], streamInBackground=False)
+```
+
+## Rate a generated audio
+
+```python
+from elevenlabslib import *
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+premadeVoice = user.get_voices_by_name("Rachel")[0]
+
+#Generate an audio (without playing it)
+generationData = premadeVoice.generate_audio("Test.")
+
+#Fetch the corresponding historyItem
+historyItem = user.get_history_item(generationData[1])
+
+#Rate it (note: there are restrictions on what can be rated and how)
+historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech service works very well!")
+```
+
+## Use the multilingual TTS model
+
+```python
+from elevenlabslib import *
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+premadeVoice = user.get_voices_by_name("Rachel")[0]
+
+#Print the models available to the user (you'll need the model_id for the multilingual one)
+print(user.get_available_models())
+
+premadeVoice.generate_play_audio("Questa è una prova!", playInBackground=False, model_id="eleven_multilingual_v1")
+```
 
 ## Create and edit a cloned voice
 
 ```python
 from elevenlabslib import *
 
-api_key = "INSERT KEY HERE"
+api_key = "api_key"
 newVoiceName = "newVoice"
 user = ElevenLabsUser(api_key)
 
@@ -85,13 +138,38 @@ except IndexError:
         })
 ```
 
+## Create a voice using Voice Design
+
+```python
+from elevenlabslib.helpers import *
+from elevenlabslib import *
+
+api_key = "api_key"
+newVoiceName = "newVoice"
+user = ElevenLabsUser(api_key)
+
+try:
+    #Generate the audio and get the temporary voiceID.
+    temporaryVoiceID, generatedAudio = user.design_voice(gender="female", accent="american", age="young", accent_strength=1.0)
+    
+    #Play back the generated audio.
+    play_audio_bytes(generatedAudio, playInBackground=False)
+    
+    #Add the voice to the account.
+    newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, newVoiceName)
+    
+except requests.exceptions.RequestException:
+    print("Couldn't design voice, likely out of tokens or slots.")
+
+```
+
 ## Play back and delete a history item
 
 ```python
 from elevenlabslib import *
 from elevenlabslib.helpers import *
 
-api_key = "INSERT KEY HERE"
+api_key = "api_key"
 user = ElevenLabsUser(api_key)
 
 #Generate two items to be deleted later
@@ -116,19 +194,4 @@ for historyID, downloadDataTuple in downloadedItems.items():
 #Delete them
 for item in testItems:
     item.delete()
-```
-
-## Use the multilingual TTS model
-
-```python
-from elevenlabslib import *
-
-api_key = "INSERT KEY HERE"
-user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
-
-#Print the models available to the user (you'll need the model_id for the multilingual one)
-print(user.get_available_models())
-
-premadeVoice.generate_and_play_audio("Questa è una prova!", playInBackground=False, model_id="eleven_multilingual_v1")
 ```
