@@ -32,7 +32,7 @@ class ElevenLabsVoice:
     """
     Represents a voice in the ElevenLabs API.
 
-    It's the parent class for all voices, and used directly for the premade and designed ones.
+    It's the parent class for all voices, and used directly for the premade ones.
     """
     @staticmethod
     def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
@@ -214,16 +214,15 @@ class ElevenLabsVoice:
         """
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         params = {"optimize_streaming_latency":latencyOptimizationLevel}
+
+
         response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
 
         return response.content, response.headers["history-item-id"]
     def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> bytes:
         warn("This function is deprecated. Please use generate_audio() instead, which returns both the audio data and the historyID.",DeprecationWarning)
-        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
-        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload)
+        return self.generate_audio(prompt, stability, similarity_boost, model_id)[0]
 
-
-        return response.content
     def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str, sd.OutputStream]:
@@ -255,9 +254,7 @@ class ElevenLabsVoice:
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1") -> bytes:
         warn("This function is deprecated. Please use generate_play_audio() instead, which returns both the audio data and the historyID.",DeprecationWarning)
-        audioData = self.generate_audio_bytes(prompt, stability, similarity_boost, model_id)
-        play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-        return audioData
+        return self.generate_play_audio(prompt, playInBackground, portaudioDeviceID, stability, similarity_boost, onPlaybackStart, onPlaybackEnd, model_id)[0]
 
     def generate_and_stream_audio(self, *args, **kwargs) -> str:
         warn("This function is deprecated. Please use generate_stream_audio instead, which returns both the historyID and a future for the audio OutputStream (for playback control).")
@@ -380,10 +377,15 @@ class ElevenLabsVoice:
         """
         Set the user linked to the voice, whose API key will be used.
 
+        Warning:
+            Only supported for premade voices, as others do not have consistent IDs.
+
         Args:
             newUser (ElevenLabsUser): The new user to link to the voice.
 
         """
+        if self.category != "premade":
+            raise ValueError("Cannot change linked user of a non-premade voice.")
         self._linkedUser = newUser
 
     @property
