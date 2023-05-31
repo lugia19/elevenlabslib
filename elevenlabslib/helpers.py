@@ -1,6 +1,8 @@
 import io
 import logging
+import queue
 import threading
+import time
 from typing import Optional, BinaryIO, Callable, Union
 
 import sounddevice as sd
@@ -176,3 +178,51 @@ class _SDPlaybackWrapper:
     def end_playback(self):
         self.onPlaybackEnd()
         self.endPlaybackEvent.set()
+
+class PeekQueue(queue.Queue):
+    def peek(self):
+        with self.mutex:
+            return list(self.queue)[0]
+
+    def snapshot(self):
+        with self.mutex:
+            return list(self.queue)
+
+
+def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:PeekQueue) -> requests.Response:
+    #Just a helper function which does all the concurrency stupidity for TTS calls.
+    waitMultiplier = 1
+    try:
+        response = requestFunction()
+        response.raise_for_status() #Just in case the callable isn't a function that already does this.
+    except requests.exceptions.RequestException as e:
+        if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
+            logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
+            # Insert this in the user's "waiting to be generated" queue.
+            generationQueue.put(generationID)
+            response = None
+        else:
+            raise e
+
+    if response is None:
+        while True:
+            try:
+                peeked = generationQueue.peek()
+                if peeked == generationID:
+                    response = requestFunction()
+                    response.raise_for_status()
+                    generationQueue.get()
+                    break
+                else:
+                    logging.debug(f"\nCurrent first is {peeked}, we are {generationID}\n")
+                    logging.debug(f"\nOther items are first in queue, waiting for 0.3s\n")
+                    time.sleep(0.5)  # The time to peek at the queue is constant.
+            except requests.exceptions.RequestException as e:
+                if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
+                    logging.debug(f"\nWaiting for {0.5 * waitMultiplier}s\n")
+                    time.sleep(0.5 * waitMultiplier)  # Just wait a moment and try again.
+                    waitMultiplier += 1
+                    continue
+                raise e
+
+    return response

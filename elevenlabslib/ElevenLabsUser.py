@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io
+import queue
 import zipfile
 
 from typing import TYPE_CHECKING, BinaryIO, Union
@@ -39,7 +40,7 @@ class ElevenLabsUser:
         for key, value in default_headers.items():
             self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
-
+        self.generation_queue = PeekQueue()
         # TODO: Add public userID as a getter.
 
         try:
@@ -169,7 +170,7 @@ class ElevenLabsUser:
             if voiceData["category"] == "cloned" and not canUseClonedVoices:
                 continue
             if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "complete":
-                #TODO: Change this value to the proper one once I actually know what it is. "complete" is merely a placeholder.
+                #TODO: Change the finetuning_state value to the proper one once I actually know what it is. "complete" is merely a placeholder.
                 continue
             availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import concurrent.futures
+import datetime
 import os
 import queue
 
 import threading
+import time
 from concurrent.futures import Future
 from typing import Optional, Tuple, Any
 from warnings import warn
@@ -22,8 +24,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
-
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -177,7 +178,7 @@ class ElevenLabsVoice:
             payload["voice_settings"]["similarity_boost"] = similarity_boost
         return payload
 
-    def generate_to_historyID(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1") -> str:
+    def generate_to_historyID(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> str:
         """
         Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
 
@@ -186,12 +187,16 @@ class ElevenLabsVoice:
             stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
             similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
             model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-
+            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
         Returns:
             The ID for the new HistoryItem
         """
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
-        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True)
+        params = {"optimize_streaming_latency": latencyOptimizationLevel}
+
+        requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
+        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+        response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
         return response.headers["history-item-id"]
 
@@ -215,8 +220,9 @@ class ElevenLabsVoice:
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         params = {"optimize_streaming_latency":latencyOptimizationLevel}
 
-
-        response = _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+        requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+        response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
         return response.content, response.headers["history-item-id"]
     def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> bytes:
@@ -297,7 +303,9 @@ class ElevenLabsVoice:
         payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
         path = "/text-to-speech/" + self._voiceID + "/stream"
 
-        streamedResponse = requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency":latencyOptimizationLevel})
+        requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency":latencyOptimizationLevel})
+        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+        streamedResponse = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
         streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         audioStreamFuture = concurrent.futures.Future()
