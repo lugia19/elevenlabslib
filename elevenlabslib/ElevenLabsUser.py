@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, BinaryIO, Union
 from warnings import warn
 
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
+from elevenlabslib.ElevenLabsVoice import ElevenLabsEditableVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
 
 
@@ -39,6 +40,8 @@ class ElevenLabsUser:
             self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
 
+        # TODO: Add public userID as a getter.
+
         try:
             self.get_available_voices()
         except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
@@ -53,6 +56,8 @@ class ElevenLabsUser:
                 raise ValueError("Invalid API Key!")
             else:
                 raise e
+
+
     def _get_subscription_data(self) -> dict:
         response = _api_get("/user/subscription", self._headers)
         subscriptionData = response.json()
@@ -438,3 +443,45 @@ class ElevenLabsUser:
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
         response = _api_multipart("/voices/add", self._headers, data=payload, filesData=files)
         return self.get_voice_by_ID(response.json()["voice_id"])
+
+    def add_shared_voice_from_URL(self, shareURL:str, newName:str) -> ElevenLabsDesignedVoice:
+        """
+        Adds a voice from a share link to the account.
+
+        Args:
+            shareURL (str): The sharing URL for the voice.
+            newName (str): Name to give to the voice.
+
+        Returns:
+            ElevenLabsDesignedVoice: The newly created voice.
+        """
+        userIDStartIndex = shareURL.index("/voice-lab/share/") + len("/voice-lab/share/")
+        voiceIDStartIndex = shareURL.index("/", userIDStartIndex)
+        publicUserID = shareURL[userIDStartIndex:voiceIDStartIndex]
+        voiceID = shareURL[voiceIDStartIndex+1:]
+        if voiceID[-1] == "/":
+            voiceID = voiceID[:len(voiceID)-1]
+
+        return self.add_shared_voice_from_info(publicUserID, voiceID, newName)
+
+    def add_shared_voice_from_info(self, publicUserID:str, voiceID:str, newName:str) -> ElevenLabsDesignedVoice:
+        """
+        Adds a voice directly from the voiceID and the public userID.
+
+        Args:
+            publicUserID (str): The public userID of the voice's creator.
+            voiceID (str): The voiceID of the voice.
+            newName (str): Name to give to the voice.
+
+        Returns:
+            ElevenLabsDesignedVoice: The newly created voice.
+        """
+        payload = {"new_name":newName}
+        try:
+            response = _api_json(f"/voices/add/{publicUserID}/{voiceID}", self._headers, jsonData=payload)
+            newVoiceID = response.json()["voice_id"]
+            return self.get_voice_by_ID(newVoiceID)
+        except requests.exceptions.RequestException as e:
+            if e.response.json()["detail"]["status"] == "voice_already_cloned":
+                raise ValueError(f"You've already added the voice {voiceID} to your account!")
+            raise e

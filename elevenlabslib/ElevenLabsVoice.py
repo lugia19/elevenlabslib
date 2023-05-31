@@ -55,7 +55,7 @@ class ElevenLabsVoice:
             _downloadChunkSize = downloadChunkSize
 
     @staticmethod
-    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
+    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice:
         """
         Initializes a new instance of ElevenLabsVoice or one of its subclasses depending on voiceData.
 
@@ -93,6 +93,7 @@ class ElevenLabsVoice:
         self.initialName = voiceData["name"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
+        self._sharingData = voiceData["sharing"]
 
     def get_settings(self) -> dict:
         """
@@ -389,10 +390,13 @@ class ElevenLabsVoice:
     def voiceID(self):
         return self._voiceID
 
-
-class ElevenLabsDesignedVoice(ElevenLabsVoice):
+class ElevenLabsEditableVoice(ElevenLabsVoice):
+    """
+    This class is shared by all the voices which can have their names edited and be deleted from an account.
+    """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
+
 
     def edit_voice(self, newName:str = None, newLabels:dict[str, str] = None, description:str = None):
         """
@@ -427,10 +431,48 @@ class ElevenLabsDesignedVoice(ElevenLabsVoice):
         response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
 
-class ElevenLabsProfessionalVoice(ElevenLabsDesignedVoice):
+class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
+    """
+    Represents a voice created via voice design.
+    """
+    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+        super().__init__(voiceData, linkedUser)
+
+    def toggle_sharing(self, sharingEnabled:bool) -> Union[str,None]:
+        """
+        Toggles the sharing status, assuming it is not a copied voice.
+
+        Args:
+            sharingEnabled (bool): Whether to enable or disable sharing.
+
+        Returns:
+            str|None: The share URL for the voice, if you enabled sharing, or None if you disabled it.
+        """
+        sharingEnabledString = str(sharingEnabled).lower()
+
+        if self.get_info()["sharing"]["status"] == "copied":
+            raise RuntimeError("Cannot change sharing status of copied voices!")
+
+        response = _api_multipart("/voices/" + self._voiceID + "/share", self._linkedUser.headers, data=sharingEnabledString)
+
+        if sharingEnabled:
+            return self.get_share_link()
+        else:
+            return None
+    def get_share_link(self) -> str:
+        sharingData = self.get_info()["sharing"]
+        if sharingData is None or sharingData["status"] == "disabled":
+            raise RuntimeError("This voice does not have sharing enabled.")
+
+        #TODO: Implement this, once the public userID is added to the user endpoint.
+        return "NOT YET IMPLEMENTED."
+
+class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
     """
     Note:
         This is merely a stub for the time being, as professional voices are not yet fully available.
+
+    Represents a voice created via professional voice cloning.
     """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
@@ -450,7 +492,10 @@ class ElevenLabsProfessionalVoice(ElevenLabsDesignedVoice):
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
 
-class ElevenLabsClonedVoice(ElevenLabsDesignedVoice):
+class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
+    """
+    Represents a voice created via instant voice cloning.
+    """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
