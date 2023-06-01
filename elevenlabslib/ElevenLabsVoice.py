@@ -448,7 +448,7 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
 
-    def toggle_sharing(self, sharingEnabled:bool) -> Union[str,None]:
+    def set_sharing(self, sharingEnabled:bool) -> Union[str,None]:
         """
         Toggles the sharing status, assuming it is not a copied voice.
 
@@ -464,7 +464,6 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
             raise RuntimeError("Cannot change sharing status of copied voices!")
 
         response = _api_multipart("/voices/" + self._voiceID + "/share", self._linkedUser.headers, data=sharingEnabledString)
-
         if sharingEnabled:
             return self.get_share_link()
         else:
@@ -474,8 +473,10 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
         if sharingData is None or sharingData["status"] == "disabled":
             raise RuntimeError("This voice does not have sharing enabled.")
 
-        #TODO: Implement this, once the public userID is added to the user endpoint.
-        return "NOT YET IMPLEMENTED."
+        publicOwnerID = sharingData["public_owner_id"]
+        originalVoiceID = sharingData["original_voice_id"]
+
+        return f"https://beta.elevenlabs.io/voice-lab/share/{publicOwnerID}/{originalVoiceID}"
 
 class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
     """

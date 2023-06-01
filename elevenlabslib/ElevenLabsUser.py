@@ -41,7 +41,6 @@ class ElevenLabsUser:
             self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
         self.generation_queue = PeekQueue()
-        # TODO: Add public userID as a getter.
 
         try:
             self.get_available_voices()
