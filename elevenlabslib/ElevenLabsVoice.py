@@ -402,7 +402,7 @@ class ElevenLabsVoice:
 
 class ElevenLabsEditableVoice(ElevenLabsVoice):
     """
-    This class is shared by all the voices which can have their names edited and be deleted from an account.
+    This class is shared by all the voices which can have their details edited and be deleted from an account.
     """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
@@ -450,7 +450,7 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
 
     def set_sharing(self, sharingEnabled:bool) -> Union[str,None]:
         """
-        Toggles the sharing status, assuming it is not a copied voice.
+        Edits the sharing status, assuming it is not a copied voice.
 
         Args:
             sharingEnabled (bool): Whether to enable or disable sharing.
@@ -469,6 +469,15 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
         else:
             return None
     def get_share_link(self) -> str:
+        """
+        Returns the share link for the voice.
+
+        Warning:
+            If sharing is disabled, raises a RuntimeError.
+
+        Returns:
+            The share link for the voice.
+        """
         sharingData = self.get_info()["sharing"]
         if sharingData is None or sharingData["status"] == "disabled":
             raise RuntimeError("This voice does not have sharing enabled.")
