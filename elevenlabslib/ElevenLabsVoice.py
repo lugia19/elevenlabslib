@@ -468,6 +468,30 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
             return self.get_share_link()
         else:
             return None
+
+    def set_library_sharing(self, sharingEnabled:bool) -> None:
+        """
+        Edits the library sharing status, assuming it is not a copied voice.
+
+        Note:
+            If you try to enable library sharing but don't have normal sharing enabled, it will be enabled automatically.
+
+            The same does NOT apply in reverse - if you disable library sharing, normal sharing will remain enabled.
+
+        Args:
+            sharingEnabled (bool): Whether to enable or disable public library sharing.
+
+        """
+        sharingEnabledString = str(sharingEnabled).lower()
+        sharingInfo = self.get_info()["sharing"]
+        if sharingInfo is not None and sharingInfo["status"] == "copied":
+            raise RuntimeError("Cannot change library sharing status of copied voices!")
+
+        if sharingInfo is None or sharingInfo["status"] != "enabled" and sharingEnabled:
+            self.set_sharing(sharingEnabled)
+
+        response = _api_multipart("/voices/" + self._voiceID + "/share-library", self._linkedUser.headers, data=sharingEnabledString)
+
     def get_share_link(self) -> str:
         """
         Returns the share link for the voice.
