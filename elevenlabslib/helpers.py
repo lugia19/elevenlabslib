@@ -80,7 +80,19 @@ def _pretty_print_POST(res:requests.Response):
     ))
 
 
+def run_ai_speech_classifier(audioBytes:bytes):
+    """
+    Runs Elevenlabs' AI speech classifier on the provided audio data.
+    Parameters:
+        audioBytes: The bytes of the audio file (mp3, wav, most formats should work) you want to analzye
 
+    Returns:
+        Dict containing all the information returned by the tool (usually just the probability of it being AI generated)
+    """
+    data = io.BytesIO(audioBytes)
+    files = {'file': ('audioSample.mp3', data, 'audio/mpeg')}
+    response = _api_multipart("/moderation/ai-speech-classification", headers=None, data=None, filesData=files)
+    return response.json()
 
 def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
