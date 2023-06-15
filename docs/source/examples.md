@@ -75,6 +75,18 @@ print(f"Randomly chosen device: {outputDevice['name']}")
 voice.generate_stream_audio("Device output test.",portaudioDeviceID=outputDevice["index"], streamInBackground=False)
 ```
 
+## Check if an audio file was generated with Elevenlabs
+
+```python
+from elevenlabslib.helpers import *
+
+filePath = "audioFile.mp3"
+audioBytes = open(filePath, "rb").read()
+
+responseDict = run_ai_speech_classifier(audioBytes)
+print(f"There's a {responseDict['probability'] * 100}% chance that this audio was AI generated.")
+```
+
 ## Rate a generated audio
 
 ```python
