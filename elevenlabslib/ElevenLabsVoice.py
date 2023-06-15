@@ -458,12 +458,17 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
         Returns:
             str|None: The share URL for the voice, if you enabled sharing, or None if you disabled it.
         """
-        sharingEnabledString = str(sharingEnabled).lower()
+        warn("This is currently broken, as ElevenLabs have disabled accessing the sharing endpoints via the API key.")
+
+        payload = {
+            "enable":sharingEnabled,
+            "emails":[]
+        }
         sharingInfo = self.get_info()["sharing"]
         if sharingInfo is not None and sharingInfo["status"] == "copied":
             raise RuntimeError("Cannot change sharing status of copied voices!")
 
-        response = _api_multipart("/voices/" + self._voiceID + "/share", self._linkedUser.headers, data=sharingEnabledString)
+        response = _api_json("/voices/" + self._voiceID + "/share", self._linkedUser.headers, jsonData=payload)
         if sharingEnabled:
             return self.get_share_link()
         else:
