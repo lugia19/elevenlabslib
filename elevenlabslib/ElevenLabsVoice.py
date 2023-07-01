@@ -225,9 +225,6 @@ class ElevenLabsVoice:
         response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
         return response.content, response.headers["history-item-id"]
-    def generate_audio_bytes(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> bytes:
-        warn("This function is deprecated. Please use generate_audio() instead, which returns both the audio data and the historyID.",DeprecationWarning)
-        return self.generate_audio(prompt, stability, similarity_boost, model_id)[0]
 
     def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
@@ -255,17 +252,6 @@ class ElevenLabsVoice:
         audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id, latencyOptimizationLevel)
         outputStream = play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
         return audioData, historyID, outputStream
-
-    def generate_and_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                                stability:Optional[float]=None, similarity_boost:Optional[float]=None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1") -> bytes:
-        warn("This function is deprecated. Please use generate_play_audio() instead, which returns both the audio data and the historyID.",DeprecationWarning)
-        return self.generate_play_audio(prompt, playInBackground, portaudioDeviceID, stability, similarity_boost, onPlaybackStart, onPlaybackEnd, model_id)[0]
-
-    def generate_and_stream_audio(self, *args, **kwargs) -> str:
-        warn("This function is deprecated. Please use generate_stream_audio instead, which returns both the historyID and a future for the audio OutputStream (for playback control).")
-        return self.generate_stream_audio(*args, **kwargs)[0]
-
     def generate_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
                                   onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[
