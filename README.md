@@ -42,7 +42,7 @@ voice = user.get_voices_by_name("Rachel")[0]  # This is a list because multiple 
 
 voice.play_preview(playInBackground=False)
 
-voice.generate_play_audio("Test.", playInBackground=False)
+voice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False))
 
 for historyItem in user.get_history_items_paginated():
     if historyItem.text == "Test.":
