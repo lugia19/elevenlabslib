@@ -171,7 +171,7 @@ class ElevenLabsVoice:
         stability = generationOptions.stability
         similarity_boost = generationOptions.similarity_boost
         style = generationOptions.style
-        speaker_boost = generationOptions.speaker_boost
+        use_speaker_boost = generationOptions.use_speaker_boost
 
         payload = {"text": prompt, "model_id": model_id}
         if stability is not None or similarity_boost is not None:
@@ -179,7 +179,7 @@ class ElevenLabsVoice:
             if stability is None: stability = currentSettings["stability"]
             if similarity_boost is None: similarity_boost = currentSettings["similarity_boost"]
             if style is None: style = currentSettings["style"]
-            if speaker_boost is None: speaker_boost = currentSettings["use_speaker_boost"]
+            if use_speaker_boost is None: use_speaker_boost = currentSettings["use_speaker_boost"]
 
             for var in stability, similarity_boost, style:
                 if not (0 <= var <= 1):
@@ -189,7 +189,7 @@ class ElevenLabsVoice:
             payload["voice_settings"]["stability"] = stability
             payload["voice_settings"]["similarity_boost"] = similarity_boost
             payload["voice_settings"]["style"] = style
-            payload["voice_settings"]["use_speaker_boost"] = speaker_boost
+            payload["voice_settings"]["use_speaker_boost"] = use_speaker_boost
 
         return payload
 

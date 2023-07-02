@@ -111,7 +111,7 @@ class GenerationOptions:
         stability (float, optional): A float between 0 and 1 representing the stability of the generated audio. If omitted, the current stability setting is used.
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
-        speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
+        use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
 
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
@@ -124,9 +124,9 @@ class GenerationOptions:
             - 4: 100% + text normalizer disabled (best latency but can mispronounce numbers/dates)
 
     Warning:
-        The style and speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
+        The style and use_speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
 
-        Setting style to higher than 0 and enabling speaker_boost will both increase latency.
+        Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
 
     """
     model_id: str = "eleven_monolingual_v1"
@@ -134,7 +134,7 @@ class GenerationOptions:
     stability: Optional[float] = None
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
-    speaker_boost: Optional[bool] = None
+    use_speaker_boost: Optional[bool] = None
 
 def run_ai_speech_classifier(audioBytes:bytes):
     """
