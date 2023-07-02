@@ -11,7 +11,7 @@ user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 #Generate the audio and get the bytes and historyID. Setting stability here only overrides it for this generation.
-generationData = premadeVoice.generate_play_audio("This is a test.", stability=0.4, playInBackground=True)
+generationData = premadeVoice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True), GenerationOptions(stability=0.4))
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
 save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
@@ -38,10 +38,10 @@ voice = user.get_voices_by_name("Rachel")[0]
 usingStreaming = True
 if usingStreaming:
     #The stream function uses a future rather than returing the audioStream directly.
-    audioStreamFuture = voice.generate_stream_audio("I am currently testing the playback control.", streamInBackground=True)[1]
+    audioStreamFuture = voice.generate_stream_audio_v2("I am currently testing the playback control.", PlaybackOptions(runInBackground=True))[1]
     audioStream = audioStreamFuture.result()
 else:
-    audioStream = voice.generate_play_audio("I am currently testing the playback control.", playInBackground=True)[1]
+    audioStream = voice.generate_play_audio_v2("I am currently testing the playback control.", PlaybackOptions(runInBackground=True))[1]
 
 #Wait for the thread to be active, then stop the playback.
 while not audioStream.active:
@@ -72,7 +72,7 @@ outputDevice = random.choice(outputDevices)
 print(f"Randomly chosen device: {outputDevice['name']}")
 
 #WARNING: Since we're choosing it randomly, it may be invalid and cause errors.
-voice.generate_stream_audio("Device output test.",portaudioDeviceID=outputDevice["index"], streamInBackground=False)
+voice.generate_stream_audio_v2("Device output test.", PlaybackOptions(runInBackground=False, portaudioDeviceID=outputDevice["index"]))
 ```
 
 ## Check if an audio file was generated with Elevenlabs
@@ -97,7 +97,7 @@ user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 #Generate an audio (without playing it)
-generationData = premadeVoice.generate_audio("Test.")
+generationData = premadeVoice.generate_audio_v2("Test.")
 
 #Fetch the corresponding historyItem
 historyItem = user.get_history_item(generationData[1])
@@ -118,7 +118,7 @@ premadeVoice = user.get_voices_by_name("Rachel")[0]
 #Print the models available to the user (you'll need the model_id for the multilingual one)
 print(user.get_available_models())
 
-premadeVoice.generate_play_audio("Questa è una prova!", playInBackground=False, model_id="eleven_multilingual_v1")
+premadeVoice.generate_play_audio_v2("Questa è una prova!", PlaybackOptions(runInBackground=False), GenerationOptions(model_id="eleven_multilingual_v1"))
 ```
 
 ## Create and edit a cloned voice
@@ -165,7 +165,7 @@ try:
     temporaryVoiceID, generatedAudio = user.design_voice(gender="female", accent="american", age="young", accent_strength=1.0)
     
     #Play back the generated audio.
-    play_audio_bytes(generatedAudio, playInBackground=False)
+    play_audio_bytes_v2(generatedAudio, PlaybackOptions(runInBackground=False))
     
     #Add the voice to the account.
     newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, newVoiceName)
@@ -186,8 +186,8 @@ user = ElevenLabsUser(api_key)
 
 #Generate two items to be deleted later
 premadeVoice = user.get_voices_by_name("Rachel")[0]
-premadeVoice.generate_audio("Test.")
-premadeVoice.generate_audio("Test.")
+premadeVoice.generate_audio_v2("Test.")
+premadeVoice.generate_audio_v2("Test.")
 
 #Find them, download them then delete them.
 #Note - I'm assuming they're within the last 10 generations, since they were just created.
@@ -201,7 +201,7 @@ downloadedItems = user.download_history_items_v2(testItems)
 
 #Play them back
 for historyID, downloadDataTuple in downloadedItems.items():
-    play_audio_bytes(downloadDataTuple[0], playInBackground=False)
+    play_audio_bytes_v2(downloadDataTuple[0], PlaybackOptions(runInBackground=False))
 
 #Delete them
 for item in testItems:
