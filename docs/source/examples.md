@@ -1,16 +1,16 @@
 # Usage examples
 
-## Play back, save and delete generated audio
+## Play back, save and delete a generated audio
 
 ```python
-from elevenlabslib.helpers import *
 from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
-#Generate the audio and get the bytes and historyID. Setting stability here only overrides it for this generation.
+#Generate the audio and get the bytes and historyID. 
+#The GenerationOptions specified here only apply for this generation.
 generationData = premadeVoice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True), GenerationOptions(stability=0.4))
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
@@ -24,6 +24,23 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 
 #Delete it
 historyItem.delete()
+```
+
+## Generate an audio with the (alpha) V2 english model and its new settings
+
+```python
+from elevenlabslib import *
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+premadeVoice = user.get_voices_by_name("Rachel")[0]
+
+# Generate and play the audio using the English v2 model.
+playbackOptions = PlaybackOptions(runInBackground=False)
+generationOptions = GenerationOptions(model_id="eleven_english_v2", stability=0.3, similarity_boost=0.7, style=0.6,
+                                      use_speaker_boost=True)
+premadeVoice.generate_play_audio_v2("This is a test.", playbackOptions, generationOptions)
+
 ```
 
 ## Control the background playback of an audio
