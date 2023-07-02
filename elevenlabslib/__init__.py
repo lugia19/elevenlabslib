@@ -5,4 +5,7 @@ from .ElevenLabsVoice import ElevenLabsClonedVoice
 from .ElevenLabsVoice import ElevenLabsProfessionalVoice
 from .ElevenLabsSample import ElevenLabsSample
 from .ElevenLabsHistoryItem import ElevenLabsHistoryItem
-__all__ = ["ElevenLabsUser", "ElevenLabsVoice","ElevenLabsClonedVoice","ElevenLabsDesignedVoice", "ElevenLabsEditableVoice", "ElevenLabsProfessionalVoice", "ElevenLabsSample", "ElevenLabsHistoryItem"]
+from .helpers import GenerationOptions, PlaybackOptions, run_ai_speech_classifier, play_audio_bytes_v2, save_audio_bytes
+__all__ = ["ElevenLabsUser", "ElevenLabsVoice","ElevenLabsClonedVoice","ElevenLabsDesignedVoice", "ElevenLabsEditableVoice",
+           "ElevenLabsProfessionalVoice", "ElevenLabsSample", "ElevenLabsHistoryItem", "GenerationOptions", "PlaybackOptions",
+           "run_ai_speech_classifier","play_audio_bytes_v2","save_audio_bytes"]
