@@ -45,11 +45,25 @@ class ElevenLabsHistoryItem:
 
     @property
     def settings_used(self):
-        """
-        The settings used for this generation.
-        """
+        warn("This is deprecated in favor of generation_settings, which returns a GenerationOptions object instead.")
         return self._settingsUsed
 
+    @property
+    def generation_settings(self):
+        """
+        The settings used for this generation, as a GenerationOptions object.
+
+        Warning:
+            The following properties will be missing/invalid in the returned GenerationOptions due to the API not providing them:
+                - model_id will be set to "UNKNOWN"
+                - latencyOptimizationLevel will be set to -1
+        """
+        return GenerationOptions(model_id="UNKNOWN",
+                                 stability=self._settingsUsed.get("stability"),
+                                 similarity_boost=self._settingsUsed.get("similarity_boost"),
+                                 style=self._settingsUsed.get("style"),
+                                 use_speaker_boost=self._settingsUsed.get("use_speaker_boost"),
+                                 latencyOptimizationLevel=-1)
     @property
     def historyID(self):
         """
