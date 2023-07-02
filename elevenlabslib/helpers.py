@@ -96,8 +96,8 @@ class PlaybackOptions:
     """
     runInBackground: bool
     portaudioDeviceID: Optional[int] = None
-    onPlaybackStart: Callable[[], None] = lambda: None
-    onPlaybackEnd: Callable[[], None] = lambda: None
+    onPlaybackStart: Callable[[], Any] = lambda: None
+    onPlaybackEnd: Callable[[], Any] = lambda: None
 
 @dataclasses.dataclass
 class GenerationOptions:
