@@ -3,6 +3,7 @@ import json
 import os
 
 import requests
+import sounddevice
 
 from elevenlabslib.helpers import *
 from elevenlabslib import *
@@ -26,9 +27,6 @@ def main():
     #Create the user object
     user = ElevenLabsUser(apiKey)
 
-    #Set up the playback options, which will be re-used throughout the code.
-    playbackOptions = PlaybackOptions(runInBackground=False)
-
     #Delete voices if they already exist
     try:
         user.get_voices_by_name("ClonedVoiceTest")[0].delete_voice()
@@ -50,7 +48,7 @@ def main():
         generatedAudio = None
         print("Couldn't design voice, likely out of tokens.")
     if temporaryVoiceID is not None:
-        play_audio_bytes_v2(generatedAudio, playbackOptions)
+        play_audio_bytes_v2(generatedAudio, PlaybackOptions(runInBackground=False))
 
         #We have the audio sample for the new voice and the TEMPORARY voice ID. The voice is not yet saved to our account.
         #Let's play back the audio sample and then save the voice to the account.
@@ -79,9 +77,9 @@ def main():
         newGeneratedVoice.edit_settings(stability, similarityBoost)
         try:
             # Generate an output:
-            newGeneratedVoice.generate_play_audio_v2("Test.", playbackOptions=playbackOptions)
+            newGeneratedVoice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False))
             # Generate an output overwriting the stability and/or similarity setting for this generation:
-            newGeneratedVoice.generate_play_audio_v2("Test.", playbackOptions=playbackOptions, generationOptions=GenerationOptions(stability=0.3))
+            newGeneratedVoice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False), generationOptions=GenerationOptions(stability=0.3))
         except requests.exceptions.RequestException:
             print("Couldn't generate output, likely out of tokens.")
 
@@ -97,7 +95,7 @@ def main():
             assert (voice.voiceID != storedVoiceID)
 
 
-    if user.get_voice_clone_available():
+    if user.get_voice_clone_available() and False:
         # Add a voice (uploading the sample from bytes):
         firstSampleBytes = open(samplePath1, "rb").read()
 
@@ -165,7 +163,7 @@ def main():
     premadeVoice:ElevenLabsVoice = user.get_voices_by_name("Rachel")[0]
     try:
         #Playback in normal mode, waiting for the whole file to be downloaded before playing it back, on a specific device.
-        premadeVoice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False, portaudioDeviceID=1))
+        premadeVoice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False, portaudioDeviceID=sounddevice.default.device))
 
         #Playback with streaming (without waiting for the whole file to be downloaded, so with a faster response time)
         #Additionally, the second one will begin downloading while the first one is still playing, but will only start playing once the first is done.
@@ -174,7 +172,7 @@ def main():
         print("Doing two STREAMED playbacks back to back...")
 
         premadeVoice.generate_stream_audio_v2("Test One.", playbackOptions=PlaybackOptions(runInBackground=True, onPlaybackEnd=firstPlaybackEnded.set))
-        premadeVoice.generate_stream_audio_v2("Test One.", playbackOptions=PlaybackOptions(runInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=firstPlaybackEnded.set))
+        premadeVoice.generate_stream_audio_v2("Test Two.", playbackOptions=PlaybackOptions(runInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set))
 
         print("Waiting for both playbacks to end...")
         secondPlaybackEnded.wait()
@@ -182,7 +180,7 @@ def main():
         #Generate a sample and save it to disk, then play it back.
         mp3Data = premadeVoice.generate_audio_v2("Test.")[0]
         save_audio_bytes(mp3Data, "test.wav","wav")
-        play_audio_bytes_v2(open("test.wav","rb").read(), playbackOptions=PlaybackOptions(runInBackground=False, portaudioDeviceID=1))
+        play_audio_bytes_v2(open("test.wav","rb").read(), playbackOptions=PlaybackOptions(runInBackground=False, portaudioDeviceID=sounddevice.default.device))
 
         #Generate a sample and save it to a file-like object, then play it back.
         memoryFile = io.BytesIO()
