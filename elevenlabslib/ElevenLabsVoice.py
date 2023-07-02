@@ -154,45 +154,65 @@ class ElevenLabsVoice:
         payload = {"stability": stability, "similarity_boost": similarity_boost}
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
-    def _generate_payload(self, prompt:str, stability:Optional[float]=None, similarity_boost:Optional[float]=None, model_id:str="eleven_monolingual_v1") -> dict:
+    def _generate_payload(self, prompt:str, generationOptions:GenerationOptions=None):
         """
         Generates the payload for the text-to-speech API call.
 
         Args:
             prompt (str): The prompt to generate speech for.
-            stability (Optional[float]): A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-            similarity_boost (Optional[float]): A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
+            generationOptions (GenerationOptions): The options for this generation.
         Returns:
             dict: A dictionary representing the payload for the API call.
         """
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        model_id = generationOptions.model_id
+        stability = generationOptions.stability
+        similarity_boost = generationOptions.similarity_boost
+        style = generationOptions.style
+        speaker_boost = generationOptions.speaker_boost
+
         payload = {"text": prompt, "model_id": model_id}
         if stability is not None or similarity_boost is not None:
             currentSettings = self.get_settings()
             if stability is None: stability = currentSettings["stability"]
             if similarity_boost is None: similarity_boost = currentSettings["similarity_boost"]
-            if not (0 <= stability <= 1 and 0 <= similarity_boost <= 1):
-                raise ValueError("Please provide a value between 0 and 1.")
+            if style is None: style = currentSettings["style"]
+            if speaker_boost is None: speaker_boost = currentSettings["use_speaker_boost"]
+
+            for var in stability, similarity_boost, style:
+                if not (0 <= var <= 1):
+                    raise ValueError("Please provide a value between 0 and 1.")
+
             payload["voice_settings"] = dict()
             payload["voice_settings"]["stability"] = stability
             payload["voice_settings"]["similarity_boost"] = similarity_boost
+            payload["voice_settings"]["style"] = style
+            payload["voice_settings"]["use_speaker_boost"] = speaker_boost
+
         return payload
 
     def generate_to_historyID(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> str:
+        warn("This function is deprecated. Please use generate_to_historyID_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+
+        return self.generate_to_historyID_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
+
+    def generate_to_historyID_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> str:
         """
         Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
 
         Parameters:
             prompt (str): The text prompt to generate audio from.
-            stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-            similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
+            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
         Returns:
             The ID for the new HistoryItem
         """
-        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
-        params = {"optimize_streaming_latency": latencyOptimizationLevel}
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        payload = self._generate_payload(prompt, generationOptions)
+        params = {"optimize_streaming_latency": generationOptions.latencyOptimizationLevel}
 
         requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
@@ -201,6 +221,11 @@ class ElevenLabsVoice:
         return response.headers["history-item-id"]
 
     def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
+        warn("This function is deprecated. Please use generate_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+
+        return self.generate_audio_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
+
+    def generate_audio_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> tuple[bytes,str]:
         """
         Generates speech for the given prompt and returns the audio data as bytes of an mp3 file alongside the new historyID.
 
@@ -209,16 +234,16 @@ class ElevenLabsVoice:
 
         Args:
             prompt: The prompt to generate speech for.
-            stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-            similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
+            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
         Returns:
             A tuple consisting of the bytes of the audio file and its historyID.
 
         """
-        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
-        params = {"optimize_streaming_latency":latencyOptimizationLevel}
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        payload = self._generate_payload(prompt, generationOptions)
+        params = {"optimize_streaming_latency":generationOptions.latencyOptimizationLevel}
 
         requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
@@ -226,80 +251,80 @@ class ElevenLabsVoice:
 
         return response.content, response.headers["history-item-id"]
 
+
+
     def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 stability:Optional[float]=None, similarity_boost:Optional[float]=None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str, sd.OutputStream]:
+
+        warn("This function is deprecated. Please use generate_play_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        return self.generate_play_audio_v2(prompt, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd), GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
+
+    def generate_play_audio_v2(self, prompt:str, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[bytes,str, sd.OutputStream]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
         Tip:
             This function downloads the entire file before playing it back, and even if playInBackground is set, it will halt execution until the file is downloaded.
-            If you need faster response times and background downloading and playback, use generate_and_stream_audio.
+            If you need faster response times and background downloading and playback, use generate_and_stream_audio_v2.
 
         Parameters:
             prompt (str): The text prompt to generate audio from.
-            playInBackground (bool): Whether to play audio in the background or wait for it to finish playing.
-            portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
-            stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-            similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-            onPlaybackStart: Function to call once the playback begins
-            onPlaybackEnd: Function to call once the playback ends
-            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply. See generate_and_stream_audio for more info.
+            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
+            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
+
         Returns:
            A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
         """
-        audioData, historyID = self.generate_audio(prompt, stability, similarity_boost, model_id, latencyOptimizationLevel)
-        outputStream = play_audio_bytes(audioData, playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        audioData, historyID = self.generate_audio_v2(prompt, generationOptions)
+        outputStream = play_audio_bytes_v2(audioData, playbackOptions)
+
         return audioData, historyID, outputStream
+
+
     def generate_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
                                   stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
                                   onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[
         str, Future[Any]]:
+        warn("This function is deprecated. Please use generate_stream_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        generationOptions = GenerationOptions(model_id,latencyOptimizationLevel,stability,similarity_boost)
+        playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
+        return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
+
+    def generate_stream_audio_v2(self, prompt:str, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[str, Future[Any]]:
         """
-
-        Note:
-            The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
-
-            The levels are as follows:
-                - 0: Normal, no optimizations applied
-                - 1: 50% of possible latency optimization
-                - 2: 75% of possible latency optimization
-                - 3: 100% of possible latency optimization
-                - 4: 100% + text normalizer disabled (best latency but can mispronounce numbers/dates)
-
         Generate audio bytes from the given prompt and stream them using sounddevice.
 
-        If streamInBackground is true, it will download the audio data in a separate thread, without pausing the main thread.
+        If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
 
         Parameters:
-            streamInBackground (bool): Whether or not to play the audio (and let the download complete) in a separate thread.
             prompt (str): The text prompt to generate audio from.
-            portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
-            stability: A float between 0 and 1 representing the stability of the generated audio. If None, the current stability setting is used.
-            similarity_boost: A float between 0 and 1 representing the similarity boost of the generated audio. If None, the current similarity boost setting is used.
-            onPlaybackStart: Function to call once the playback begins
-            onPlaybackEnd: Function to call once the playback ends
-            model_id (str): The ID of the TTS model to use for the generation. Defaults to monolingual english.
-            latencyOptimizationLevel (int): The level of latency optimization (0-4) to apply.
+            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
+            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
 
         Returns:
             A tuple consisting of the historyID for the newly created item and a future which will hold the audio OutputStream (to control playback)
         """
-        payload = self._generate_payload(prompt, stability, similarity_boost, model_id)
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        payload = self._generate_payload(prompt, generationOptions)
         path = "/text-to-speech/" + self._voiceID + "/stream"
 
-        requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency":latencyOptimizationLevel})
+        requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency": generationOptions.latencyOptimizationLevel})
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
         streamedResponse = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
-        streamer = _AudioChunkStreamer(portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+        streamer = _AudioChunkStreamer(playbackOptions)
         audioStreamFuture = concurrent.futures.Future()
-        if streamInBackground:
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse,audioStreamFuture))
+        if playbackOptions.runInBackground:
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse, audioStreamFuture))
             mainThread.start()
         else:
-            streamer.begin_streaming(streamedResponse,audioStreamFuture)
+            streamer.begin_streaming(streamedResponse, audioStreamFuture)
 
         return streamedResponse.headers["history-item-id"], audioStreamFuture
 
@@ -328,21 +353,11 @@ class ElevenLabsVoice:
 
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-        """
-        Plays the preview audio.
+        warn("This function is deprecated. Use play_preview_v2 instead.")
+        return self.play_preview_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
-        Args:
-            playInBackground: A bool indicating whether to play the audio in the background.
-            portaudioDeviceID: Optional int indicating the device ID to use for audio playback.
-        	onPlaybackStart: Function to call once the playback begins
-        	onPlaybackEnd: Function to call once the playback ends
-
-        Returns:
-            The sounddevice OutputStream of the playback.
-        """
-
-        return play_audio_bytes(self.get_preview_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-
+    def play_preview_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
+        return play_audio_bytes_v2(self.get_preview_bytes(), playbackOptions)
 
     @property
     def category(self):
@@ -597,19 +612,16 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
 #This way lies only madness.
 _defaultDType = "float32"
 class _AudioChunkStreamer:
-    def __init__(self,portaudioDeviceID:int = None,onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
+    def __init__(self,playbackOptions:PlaybackOptions):
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
         self._bytesLock = threading.Lock()
-        self._onPlaybackStart = onPlaybackStart
-        self._onPlaybackEnd = onPlaybackEnd
+        self._onPlaybackStart = playbackOptions.onPlaybackStart
+        self._onPlaybackEnd = playbackOptions.onPlaybackEnd
         self._frameSize = 0
 
-        if portaudioDeviceID is None:
-            portaudioDeviceID = sd.default.device
-
-        self._deviceID = portaudioDeviceID
+        self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
 
         self._events: dict[str, threading.Event] = {
             "playbackFinishedEvent": threading.Event(),

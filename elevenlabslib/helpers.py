@@ -1,9 +1,11 @@
+import dataclasses
 import io
 import logging
 import queue
 import threading
 import time
-from typing import Optional, BinaryIO, Callable, Union
+from typing import Optional, BinaryIO, Callable, Union, Any
+from warnings import warn
 
 import sounddevice as sd
 import soundfile
@@ -81,6 +83,58 @@ def _pretty_print_POST(res:requests.Response):
         req.body,
     ))
 
+@dataclasses.dataclass
+class PlaybackOptions:
+    """
+    This class holds the options for playback.
+
+    Parameters:
+        runInBackground (bool): Whether to play/stream audio in the background or wait for it to finish playing.
+        portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
+        onPlaybackStart (Callable, optional): Function to call once the playback begins.
+        onPlaybackEnd (Callable, optional): Function to call once the playback ends.
+    """
+    runInBackground: bool
+    portaudioDeviceID: Optional[int] = None
+    onPlaybackStart: Callable[[], None] = lambda: None
+    onPlaybackEnd: Callable[[], None] = lambda: None
+
+@dataclasses.dataclass
+class GenerationOptions:
+    """
+    This class holds the options for TTS generation.
+    If any option besides model_id and latencyOptimizationLevel is omitted, the stored value associated with the voice is used.
+
+    Parameters:
+        model_id (str, optional): The ID of the TTS model to use for the generation. Defaults to monolingual english v1.
+        latencyOptimizationLevel (int, optional): The level of latency optimization (0-4) to apply. Defaults to 0.
+        stability (float, optional): A float between 0 and 1 representing the stability of the generated audio. If omitted, the current stability setting is used.
+        similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
+        style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
+        speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
+
+    Note:
+        The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
+
+        The levels are as follows:
+            - 0: Normal, no optimizations applied
+            - 1: 50% of possible latency optimization
+            - 2: 75% of possible latency optimization
+            - 3: 100% of possible latency optimization
+            - 4: 100% + text normalizer disabled (best latency but can mispronounce numbers/dates)
+
+    Warning:
+        The style and speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
+
+        Setting style to higher than 0 and enabling speaker_boost will both increase latency.
+
+    """
+    model_id: str = "eleven_monolingual_v1"
+    latencyOptimizationLevel: int = 0
+    stability: Optional[float] = None
+    similarity_boost: Optional[float] = None
+    style: Optional[float] = None
+    speaker_boost: Optional[bool] = None
 
 def run_ai_speech_classifier(audioBytes:bytes):
     """
@@ -98,33 +152,31 @@ def run_ai_speech_classifier(audioBytes:bytes):
 
 def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
+    warn("This function is deprecated. Please use play_audio_bytes_v2 instead. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+
+    return play_audio_bytes_v2(audioData, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
+
+def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
     """
-    Plays the given audio and calls the given functions.
-    
-    Parameters:
-         onPlaybackStart: Function to call once the playback begins
-         onPlaybackEnd: Function to call once the playback ends
-         audioData: The audio to play
-         playInBackground: Whether to play it in the background
-         portaudioDeviceID: The ID of the portaudioDevice to play it back on (Optional)
+        Plays the given audio and calls the given functions.
 
-    Returns:
-        None
-    """
+        Parameters:
+             audioData: The audio data to play
+             playbackOptions: The playback options.
 
-    if portaudioDeviceID is None:
-        portaudioDeviceID = sd.default.device[1]
+        Returns:
+            None
+        """
 
-    #Let's make sure the user didn't just forward a tuple from one of the other functions...
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
     if isinstance(audioData, tuple):
         for item in audioData:
-            if isinstance(item,bytes):
+            if isinstance(item, bytes):
                 audioData = item
 
+    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions)
 
-    playbackWrapper = _SDPlaybackWrapper(audioData, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
-
-    if not playInBackground:
+    if not playbackOptions.runInBackground:
         with playbackWrapper.stream:
             playbackWrapper.endPlaybackEvent.wait()
     else:
@@ -133,14 +185,14 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
 
 def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
     """
-        This function saves the audio data to the specified location OR file-like object.
-        soundfile is used for the conversion, so it supports any format it does.
+    This function saves the audio data to the specified location OR file-like object.
+    soundfile is used for the conversion, so it supports any format it does.
 
-        Parameters:
-            audioData: The audio data.
-            saveLocation: The path (or file-like object) where the data will be saved.
-            outputFormat: The format in which the audio will be saved
-        """
+    Parameters:
+        audioData: The audio data.
+        saveLocation: The path (or file-like object) where the data will be saved.
+        outputFormat: The format in which the audio will be saved
+    """
 
     # Let's make sure the user didn't just forward a tuple from one of the other functions...
     if isinstance(audioData, tuple):
@@ -160,11 +212,11 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:
-    def __init__(self, audioData, deviceID, onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None):
+    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions):
         soundFile = sf.SoundFile(io.BytesIO(audioData))
         soundFile.seek(0)
-        self.onPlaybackStart = onPlaybackStart
-        self.onPlaybackEnd = onPlaybackEnd
+        self.onPlaybackStart = playbackOptions.onPlaybackStart
+        self.onPlaybackEnd = playbackOptions.onPlaybackEnd
         self.startPlaybackEvent = threading.Event()
         self.endPlaybackEvent = threading.Event()
         self.data = soundFile.read(always_2d=True)
@@ -172,7 +224,7 @@ class _SDPlaybackWrapper:
         self.stream = sd.OutputStream(channels=soundFile.channels,
             callback=self.callback,
             samplerate=soundFile.samplerate,
-            device=deviceID,
+            device=playbackOptions.portaudioDeviceID or sd.default.device,
             finished_callback=self.end_playback)
 
     def callback(self, outdata, frames, time, status):

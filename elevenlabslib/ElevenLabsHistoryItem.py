@@ -121,19 +121,19 @@ class ElevenLabsHistoryItem:
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
+        warn("This function is outdated. Please use play_audio_v2() instead.")
+        return self.play_audio_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
+
+    def play_audio_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
         """
         Plays the audio associated with the history item.
 
         Args:
-            playInBackground: a boolean indicating whether the audio should be played in the background
-            portaudioDeviceID: an optional integer representing the portaudio device ID to use
-            onPlaybackStart: Function to call once the playback begins
-            onPlaybackEnd: Function to call once the playback ends
-
+            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
         Returns:
             The sounddevice OutputStream of the playback.
         """
-        return play_audio_bytes(self.get_audio_bytes(), playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd)
+        return play_audio_bytes_v2(self.get_audio_bytes(), playbackOptions)
 
     def fetch_feedback(self):
         """
