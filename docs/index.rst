@@ -25,7 +25,7 @@ The old function signature looked like this:
    generate_stream_audio(prompt, portaudioDeviceID=None, stability=None,
                          similarity_boost=None, streamInBackground=False,
                          onPlaybackStart=lambda: None, onPlaybackEnd=lambda: None,
-                         model_id="eleven_monolingual_v1", latencyOptimizationLevel=0)
+                         model="eleven_monolingual_v1", latencyOptimizationLevel=0)
 
 Now, the new function signature looks like this:
 
@@ -51,7 +51,7 @@ To migrate your existing code, follow these steps:
    .. code-block:: python
 
       playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=1)
-      generationOptions = GenerationOptions(model_id="new_model_id")
+      generationOptions = GenerationOptions(model="new_model_id")
 
 3. Call the new functions with your text prompt and the options instances:
 
