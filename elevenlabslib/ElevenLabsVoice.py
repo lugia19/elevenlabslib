@@ -16,7 +16,7 @@ import sounddevice as sd
 
 from typing import TYPE_CHECKING
 
-
+from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsSample import ElevenLabsSample
@@ -519,9 +519,6 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
 
 class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
     """
-    Note:
-        This is merely a stub for the time being, as professional voices are not yet fully available.
-
     Represents a voice created via professional voice cloning.
     """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
@@ -541,6 +538,9 @@ class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
         for sampleData in samplesData:
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
+
+    def get_high_quality_models(self) -> list[ElevenLabsModel]:
+        return [model for model in self.linkedUser.get_models() if model.modelID in self.get_info()["high_quality_base_model_ids"]]
 
 class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
     """

@@ -13,6 +13,8 @@ import soundfile as sf
 import requests
 import os
 
+from elevenlabslib.ElevenLabsModel import ElevenLabsModel
+
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
 
@@ -106,7 +108,7 @@ class GenerationOptions:
     If any option besides model_id and latencyOptimizationLevel is omitted, the stored value associated with the voice is used.
 
     Parameters:
-        model_id (str, optional): The ID of the TTS model to use for the generation. Defaults to monolingual english v1.
+        model (ElevenLabsModel|str, optional): The TTS model (or its ID) to use for the generation. Defaults to monolingual english v1.
         latencyOptimizationLevel (int, optional): The level of latency optimization (0-4) to apply. Defaults to 0.
         stability (float, optional): A float between 0 and 1 representing the stability of the generated audio. If omitted, the current stability setting is used.
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
@@ -129,12 +131,22 @@ class GenerationOptions:
         Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
 
     """
-    model_id: str = "eleven_monolingual_v1"
     latencyOptimizationLevel: int = 0
     stability: Optional[float] = None
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
+    model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
+    model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
+    def __post_init__(self):
+        if self.model_id:
+            self.model = self.model_id
+        if not self.model_id:
+            if isinstance(self.model, str):
+                self.model_id = self.model
+            else:
+                self.model_id = self.model.modelID
+
 
 def run_ai_speech_classifier(audioBytes:bytes):
     """

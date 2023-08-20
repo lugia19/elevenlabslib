@@ -37,7 +37,7 @@ premadeVoice = user.get_voices_by_name("Rachel")[0]
 
 # Generate and play the audio using the English v2 model.
 playbackOptions = PlaybackOptions(runInBackground=False)
-generationOptions = GenerationOptions(model_id="eleven_english_v2", stability=0.3, similarity_boost=0.7, style=0.6,
+generationOptions = GenerationOptions(model="eleven_english_v2", stability=0.3, similarity_boost=0.7, style=0.6,
                                       use_speaker_boost=True)
 premadeVoice.generate_play_audio_v2("This is a test.", playbackOptions, generationOptions)
 
@@ -132,10 +132,18 @@ api_key = "api_key"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
-#Print the models available to the user (you'll need the model_id for the multilingual one)
-print(user.get_available_models())
+#Find a multilingual model (one that supports a language other than english).
+#We can't just check if it supports more than 1 language as english is split into 4 different types.
+multilingualModel = None
+for model in user.get_models():
+    for language in model.supportedLanguages:
+        if "en" not in language["language_id"]:
+            #Found a model that supports a non-english language
+            multilingualModel = model
+            break
 
-premadeVoice.generate_play_audio_v2("Questa è una prova!", PlaybackOptions(runInBackground=False), GenerationOptions(model_id="eleven_multilingual_v1"))
+#Note: The model_id can also be directly used.
+premadeVoice.generate_play_audio_v2("Questa è una prova!", PlaybackOptions(runInBackground=False), GenerationOptions(model=multilingualModel))
 ```
 
 ## Create and edit a cloned voice

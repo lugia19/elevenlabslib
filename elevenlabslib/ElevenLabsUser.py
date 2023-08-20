@@ -6,6 +6,7 @@ import zipfile
 from typing import TYPE_CHECKING, BinaryIO, Union
 from warnings import warn
 
+from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsEditableVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
@@ -57,12 +58,6 @@ class ElevenLabsUser:
             else:
                 raise e
 
-
-    def _get_subscription_data(self) -> dict:
-        response = _api_get("/user/subscription", self._headers)
-        subscriptionData = response.json()
-        return subscriptionData
-
     @property
     def headers(self) -> dict:
         """
@@ -72,34 +67,57 @@ class ElevenLabsUser:
         return self._headers
 
     def get_available_models(self) -> list[dict]:
-        """
-        This function returns all the available models for this account.
-
-        Note:
-            You can use the model_id from a model's info for calls to the text to speech endpoint.
-
-        Returns:
-            list[dict]: All the available models for this account.
-        """
+        warn("This function is deprecated. Use get_models instead.", DeprecationWarning)
         response = _api_get("/models", self._headers)
         userData = response.json()
         return userData
 
+    def get_models(self) -> list[ElevenLabsModel]:
+        """
+        This function returns all the available models for this account as ElevenLabsModel.
+
+        Returns:
+            list[ElevenLabsModel]: All the available models for this account, as ElevenLabsModel instances.
+        """
+        modelList = list()
+        response = _api_get("/models", self._headers)
+        modelDataList = response.json()
+        for modelData in modelDataList:
+            modelList.append(ElevenLabsModel(modelData, self))
+        return modelList
+
+    def get_model_by_id(self, modelID:str) -> ElevenLabsModel:
+        response = _api_get("/models", self._headers)
+        modelDataList = response.json()
+        for modelData in modelDataList:
+            if modelData["model_id"] == modelID:
+                return ElevenLabsModel(modelData, self)
+        raise ValueError("This model does not exist or is not available for your account.")
 
     def get_user_data(self) -> dict:
         """
         Returns:
              dict: All the information returned by the /v1/user endpoint.
         """
-        response = _api_get("/user/subscription", self._headers)
+        response = _api_get("/user/", self._headers)
         userData = response.json()
         return userData
+
+    def get_subscription_data(self) -> dict:
+        """
+        Returns:
+             dict: All the information returned by the /v1/user/subscription endpoint.
+        """
+        response = _api_get("/user/subscription", self._headers)
+        subscriptionData = response.json()
+        return subscriptionData
+
     def get_current_character_count(self) -> int:
         """
         Returns:
             int: The number of characters used up.
         """
-        subData = self._get_subscription_data()
+        subData = self.get_subscription_data()
         return subData["character_count"]
 
     def get_character_limit(self) -> int:
@@ -107,7 +125,7 @@ class ElevenLabsUser:
         Returns:
             int: The user's current character limit.
         """
-        subData = self._get_subscription_data()
+        subData = self.get_subscription_data()
         return subData["character_limit"]
 
     def get_can_extend_character_limit(self) -> bool:
@@ -115,7 +133,7 @@ class ElevenLabsUser:
         Returns:
             bool: True if the user can (and has enabled) extend their character limit, False otherwise.
         """
-        subData = self._get_subscription_data()
+        subData = self.get_subscription_data()
         return subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"]
 
     def get_voice_clone_available(self) -> bool:
@@ -123,7 +141,7 @@ class ElevenLabsUser:
         Returns:
             bool: True if the user can use instant voice cloning, False otherwise.
         """
-        subData = self._get_subscription_data()
+        subData = self.get_subscription_data()
         return subData["can_use_instant_voice_cloning"]
 
     def get_next_invoice(self) -> dict | None:
@@ -131,7 +149,7 @@ class ElevenLabsUser:
         Returns:
             dict | None: The next invoice's data, or None if there is no next invoice.
         """
-        subData = self._get_subscription_data()
+        subData = self.get_subscription_data()
         return subData["next_invoice"]
 
     def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
@@ -168,8 +186,7 @@ class ElevenLabsUser:
         for voiceData in voicesData["voices"]:
             if voiceData["category"] == "cloned" and not canUseClonedVoices:
                 continue
-            if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "complete":
-                #TODO: Change the finetuning_state value to the proper one once I actually know what it is. "complete" is merely a placeholder.
+            if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "fine_tuned":
                 continue
             availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
 
