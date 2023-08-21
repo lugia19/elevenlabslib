@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import datetime
 import os
@@ -8,13 +9,17 @@ import queue
 import threading
 import time
 from concurrent.futures import Future
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Iterator
 from warnings import warn
 
+import requests
 import soundfile as sf
 import sounddevice as sd
 
 from typing import TYPE_CHECKING
+
+import websockets
+from websockets.sync.client import connect
 
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
@@ -166,32 +171,66 @@ class ElevenLabsVoice:
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
+            model_id = generationOptions.model_id
+            voice_settings = None
+        else:
+            #We will assume at least ONE setting got overridden if the user is passing a generationOptions.
+            currentSettings = self.get_settings()
+            model_id = generationOptions.model_id
+            voice_settings = dict()
 
-        model_id = generationOptions.model_id
-        stability = generationOptions.stability
-        similarity_boost = generationOptions.similarity_boost
-        style = generationOptions.style
-        use_speaker_boost = generationOptions.use_speaker_boost
+            for key, currentValue in currentSettings.items():
+                overriddenValue = getattr(generationOptions, key, None)
+                voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
 
         payload = {"text": prompt, "model_id": model_id}
-        if stability is not None or similarity_boost is not None:
-            currentSettings = self.get_settings()
-            if stability is None: stability = currentSettings["stability"]
-            if similarity_boost is None: similarity_boost = currentSettings["similarity_boost"]
-            if style is None: style = currentSettings["style"]
-            if use_speaker_boost is None: use_speaker_boost = currentSettings["use_speaker_boost"]
-
-            for var in stability, similarity_boost, style:
-                if not (0 <= var <= 1):
-                    raise ValueError("Please provide a value between 0 and 1.")
-
-            payload["voice_settings"] = dict()
-            payload["voice_settings"]["stability"] = stability
-            payload["voice_settings"]["similarity_boost"] = similarity_boost
-            payload["voice_settings"]["style"] = style
-            payload["voice_settings"]["use_speaker_boost"] = use_speaker_boost
+        if voice_settings is not None:
+            payload["voice_settings"] = voice_settings
 
         return payload
+
+    def _generate_websocket_connection(self, generationOptions:GenerationOptions=None) -> websockets.sync.client.ClientConnection:
+        """
+        Generates a websocket connection for the input-streaming endpoint.
+
+        Args:
+            generationOptions (GenerationOptions): The options for this generation.
+        Returns:
+            dict: A dictionary representing the payload for the API call.
+        """
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+            model_id = generationOptions.model_id
+            voice_settings = None
+        else:
+            # We will assume at least ONE setting got overridden if the user is passing a generationOptions.
+            currentSettings = self.get_settings()
+            model_id = generationOptions.model_id
+            voice_settings = dict()
+
+            for key, currentValue in currentSettings.items():
+                overriddenValue = getattr(generationOptions, key, None)
+                voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
+
+        BOS = {
+            "text": " ",
+            "try_trigger_generation": True,
+            "generation_config": {
+                "chunk_length_schedule": [50]
+            }
+        }
+
+        if voice_settings is not None:
+            BOS["voice_settings"] = voice_settings
+
+        websocket = connect(
+            f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}",
+            additional_headers=self.linkedUser.headers
+        )
+        print(json.dumps(BOS, indent=4))
+        websocket.send(json.dumps(BOS))
+
+        return websocket
 
     def generate_to_historyID(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> str:
         warn("This function is deprecated. Please use generate_to_historyID_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
@@ -294,14 +333,17 @@ class ElevenLabsVoice:
         playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
         return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
 
-    def generate_stream_audio_v2(self, prompt:str, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[str, Future[Any]]:
+    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str]], playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[str, Future[Any]]:
         """
-        Generate audio bytes from the given prompt and stream them using sounddevice.
+        Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
 
         If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
 
+        Warning:
+            Currently, when doing input streaming, the API does not return the history item ID. This function will therefore return None in those cases. I will fix it once it does.
+
         Parameters:
-            prompt (str): The text prompt to generate audio from.
+            prompt (str|Iterator[str]): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming).
             playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
 
@@ -311,23 +353,28 @@ class ElevenLabsVoice:
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
-        payload = self._generate_payload(prompt, generationOptions)
-        path = "/text-to-speech/" + self._voiceID + "/stream"
-
-        requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True, params={"optimize_streaming_latency": generationOptions.latencyOptimizationLevel})
-        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-        streamedResponse = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        if isinstance(prompt, str):
+            payload = self._generate_payload(prompt, generationOptions)
+            path = "/text-to-speech/" + self._voiceID + "/stream"
+            #Not using input streaming
+            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
+                                                    params={"optimize_streaming_latency": generationOptions.latencyOptimizationLevel})
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        else:
+            responseConnection = self._generate_websocket_connection(generationOptions)
 
         streamer = _AudioChunkStreamer(playbackOptions)
         audioStreamFuture = concurrent.futures.Future()
         if playbackOptions.runInBackground:
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(streamedResponse, audioStreamFuture))
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, audioStreamFuture, prompt))
             mainThread.start()
         else:
-            streamer.begin_streaming(streamedResponse, audioStreamFuture)
-
-        return streamedResponse.headers["history-item-id"], audioStreamFuture
-
+            streamer.begin_streaming(responseConnection, audioStreamFuture, prompt)
+        if isinstance(responseConnection, requests.Response):
+            return responseConnection.headers["history-item-id"], audioStreamFuture
+        else:
+            return "no_history_id_available", audioStreamFuture
 
     def get_preview_url(self) -> str|None:
         """
@@ -632,15 +679,19 @@ class _AudioChunkStreamer:
             "playbackStartFired": threading.Event()
         }
 
-    def begin_streaming(self, streamedResponse:requests.Response, future:concurrent.futures.Future):
+    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
+        # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
         for eventName, event in self._events.items():
             event.clear()
 
-        downloadThread = threading.Thread(target=self._stream_downloader_function, args=(streamedResponse,))
+        if isinstance(streamConnection, requests.Response):
+            downloadThread = threading.Thread(target=self._stream_downloader_function, args=(streamConnection,))
+        else:
+            downloadThread = threading.Thread(target=self._stream_downloader_function_websockets, args=(streamConnection, text))
         downloadThread.start()
 
         while True:
@@ -704,40 +755,81 @@ class _AudioChunkStreamer:
         totalLength = 0
         logging.debug("Starting iter...")
         for chunk in streamedResponse.iter_content(chunk_size=_downloadChunkSize):
-            if self._events["headerReadyEvent"].is_set() and not self._events["soundFileReadyEvent"].is_set():
-                logging.debug("HeaderReady is set, but waiting for the soundfile...")
-                self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
-                if not self._events["headerReadyEvent"].is_set():
-                    logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
-                    self._events["soundFileReadyEvent"].clear()
-
+            self._stream_downloader_chunk_handler(chunk)
             totalLength += len(chunk)
-            if len(chunk) != _downloadChunkSize:
-                logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
-
-            # Write the new data then seek back to the initial position.
-            with self._bytesLock:
-                if not self._events["headerReadyEvent"].is_set():
-                    logging.debug("headerReady not set, setting it...")
-                    self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
-                    self._bytesFile.write(chunk)
-                    self._bytesFile.seek(0)  # Move the head back.
-                    self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
-                else:
-                    lastReadPos = self._bytesFile.tell()
-                    lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
-                    self._bytesFile.write(chunk)
-                    endPos = self._bytesFile.tell()
-                    self._bytesFile.seek(lastReadPos)
-                    logging.debug("Write head move: " + str(endPos - lastWritePos))
-                    if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
-                        logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
-                        self._events["blockDataAvailable"].set()
 
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
         self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
         return
+
+    def _stream_downloader_function_websockets(self, websocket:websockets.sync.client.ClientConnection, textIterator:Iterator[str]):
+        # This is the function running in the download thread for input streaming - some of this code is adapted from the official implementation.
+        # Partly due to a lack of documentation.
+        totalLength = 0
+        logging.debug("Starting iter...")
+
+        for text_chunk in text_chunker(textIterator):
+            data = dict(text=text_chunk, try_trigger_generation=True)
+            websocket.send(json.dumps(data))
+            try:
+                data = json.loads(websocket.recv(1e-4))
+                if data["audio"]:
+                    chunk = base64.b64decode(data["audio"])
+                    self._stream_downloader_chunk_handler(chunk)
+                    totalLength += len(chunk)
+            except TimeoutError:
+                pass
+
+        # Send end of stream
+        websocket.send(json.dumps(dict(text="")))
+
+        # Receive remaining audio
+        while True:
+            try:
+                data = json.loads(websocket.recv())
+                if data["audio"]:
+                    chunk = base64.b64decode(data["audio"])
+                    self._stream_downloader_chunk_handler(chunk)
+                    totalLength += len(chunk)
+            except websockets.exceptions.ConnectionClosed:
+                break
+
+        logging.debug("Download finished - " + str(totalLength) + ".")
+        self._events["downloadDoneEvent"].set()
+        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
+        return
+
+    def _stream_downloader_chunk_handler(self, chunk:bytes):
+        #Split the code for easier handling
+        if self._events["headerReadyEvent"].is_set() and not self._events["soundFileReadyEvent"].is_set():
+            logging.debug("HeaderReady is set, but waiting for the soundfile...")
+            self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
+            if not self._events["headerReadyEvent"].is_set():
+                logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
+                self._events["soundFileReadyEvent"].clear()
+
+        if len(chunk) != _downloadChunkSize:
+            logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
+
+        # Write the new data then seek back to the initial position.
+        with self._bytesLock:
+            if not self._events["headerReadyEvent"].is_set():
+                logging.debug("headerReady not set, setting it...")
+                self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
+                self._bytesFile.write(chunk)
+                self._bytesFile.seek(0)  # Move the head back.
+                self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
+            else:
+                lastReadPos = self._bytesFile.tell()
+                lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
+                self._bytesFile.write(chunk)
+                endPos = self._bytesFile.tell()
+                self._bytesFile.seek(lastReadPos)
+                logging.debug("Write head move: " + str(endPos - lastWritePos))
+                if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
+                    logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
+                    self._events["blockDataAvailable"].set()
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
         assert frames == _playbackBlockSize

@@ -1,10 +1,11 @@
 import dataclasses
 import io
+import json
 import logging
 import queue
 import threading
 import time
-from typing import Optional, BinaryIO, Callable, Union, Any
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator
 from warnings import warn
 
 import sounddevice as sd
@@ -131,13 +132,14 @@ class GenerationOptions:
         Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
 
     """
+    model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
     latencyOptimizationLevel: int = 0
     stability: Optional[float] = None
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
-    model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
+
     def __post_init__(self):
         if self.model_id:
             self.model = self.model_id
@@ -146,6 +148,14 @@ class GenerationOptions:
                 self.model_id = self.model
             else:
                 self.model_id = self.model.modelID
+
+        #Validate values
+        for var in [self.stability, self.similarity_boost, self.style]:
+            if var is not None and (var < 0 or var > 1):
+                raise ValueError("Please provide a value between 0 and 1 for stability, similarity_boost, and style.")
+
+        if self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4:
+            raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
 
 
 def run_ai_speech_classifier(audioBytes:bytes):
@@ -304,3 +314,21 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
                 raise e
 
     return response
+
+#Taken from the official python library - https://github.com/elevenlabs/elevenlabs-python
+def text_chunker(chunks: Iterator[str]) -> Iterator[str]:
+    """Used during input streaming to chunk text blocks and set last char to space"""
+    splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
+    buffer = ""
+    for text in chunks:
+        if buffer.endswith(splitters):
+            yield buffer if buffer.endswith(" ") else buffer + " "
+            buffer = text
+        elif text.startswith(splitters):
+            output = buffer + text[0]
+            yield output if output.endswith(" ") else output + " "
+            buffer = text[1:]
+        else:
+            buffer += text
+    if buffer != "":
+        yield buffer + " "
