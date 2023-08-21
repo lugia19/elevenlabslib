@@ -26,6 +26,38 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 historyItem.delete()
 ```
 
+## Use input streaming with the OpenAI API
+Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c6abb08e8e0a) using the official wrapper.
+```python
+from elevenlabslib import *
+import openai
+
+openai.api_key = "your_openai_key_here"
+user = ElevenLabsUser("your_elevenlabs_api_key")
+
+def write(prompt: str):
+    for chunk in openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+    ):
+        # Extract the content from the chunk if available
+        if (text_chunk := chunk["choices"][0]["delta"].get("content")) is not None:
+            print(text_chunk)
+            yield text_chunk
+
+# Generate a text stream
+text_stream = write("Give me a five sentence response.")
+
+# Pick a voice
+voice = user.get_available_voices()[0]
+
+# Stream the audio
+# WARNING: The historyID will be "no_history_id_available", due to the API currently not returning it.
+historyID, AudioStreamFuture = voice.generate_stream_audio_v2(text_stream, PlaybackOptions(runInBackground=False), GenerationOptions(latencyOptimizationLevel=4))
+
+```
+
 ## Generate an audio with the (alpha) V2 english model and its new settings
 
 ```python
@@ -40,7 +72,6 @@ playbackOptions = PlaybackOptions(runInBackground=False)
 generationOptions = GenerationOptions(model="eleven_english_v2", stability=0.3, similarity_boost=0.7, style=0.6,
                                       use_speaker_boost=True)
 premadeVoice.generate_play_audio_v2("This is a test.", playbackOptions, generationOptions)
-
 ```
 
 ## Control the background playback of an audio
