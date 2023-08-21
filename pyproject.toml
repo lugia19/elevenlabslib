@@ -14,7 +14,6 @@ readme = "README.md"
 requires-python = ">=3.7"
 dependencies=[
     "requests",
-    "typing",
     "sounddevice",
     "numpy",
     "soundfile >= 0.12.1",
