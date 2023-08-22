@@ -61,7 +61,7 @@ class ElevenLabsVoice:
             _downloadChunkSize = downloadChunkSize
 
     @staticmethod
-    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice:
+    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice:
         """
         Initializes a new instance of ElevenLabsVoice or one of its subclasses depending on voiceData.
 
@@ -763,8 +763,6 @@ class _AudioChunkStreamer:
         return
 
     def _stream_downloader_function_websockets(self, websocket:websockets.sync.client.ClientConnection, textIterator:Iterator[str]):
-        # This is the function running in the download thread for input streaming - some of this code is adapted from the official implementation.
-        # Partly due to a lack of documentation.
         totalLength = 0
         logging.debug("Starting iter...")
 

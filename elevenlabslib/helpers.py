@@ -278,7 +278,7 @@ class PeekQueue(queue.Queue):
 
 
 def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:PeekQueue) -> requests.Response:
-    #Just a helper function which does all the concurrency stupidity for TTS calls.
+    #Just a helper function which does all the concurrency stuff for TTS calls.
     waitMultiplier = 1
     try:
         response = requestFunction()

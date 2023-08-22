@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, BinaryIO, Union
 from warnings import warn
 
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
-from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice
+from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice, ElevenLabsProfessionalVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsEditableVoice
 from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
 
@@ -192,7 +192,7 @@ class ElevenLabsUser:
 
         return availableVoices
 
-    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice:
+    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice:
         """
         Gets a specific voice by ID.
 
@@ -200,13 +200,13 @@ class ElevenLabsUser:
             voiceID (str): The ID of the voice to get.
 
         Returns:
-            ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice: The requested voice.
+            ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice|ElevenLabsProfessionalVoice: The requested voice.
         """
         response = _api_get("/voices/" + voiceID, headers=self._headers)
         voiceData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice.voiceFactory(voiceData, self)
-    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
+    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
         """
         Gets a list of voices with the given name.
 
