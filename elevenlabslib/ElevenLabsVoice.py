@@ -227,7 +227,6 @@ class ElevenLabsVoice:
             f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}",
             additional_headers=self.linkedUser.headers
         )
-        print(json.dumps(BOS, indent=4))
         websocket.send(json.dumps(BOS))
 
         return websocket
