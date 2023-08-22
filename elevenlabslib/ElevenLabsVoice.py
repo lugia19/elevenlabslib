@@ -768,14 +768,19 @@ class _AudioChunkStreamer:
 
         for text_chunk in text_chunker(textIterator):
             data = dict(text=text_chunk, try_trigger_generation=True)
-            websocket.send(json.dumps(data))
+            try:
+                websocket.send(json.dumps(data))
+            except websockets.exceptions.ConnectionClosedError as e:
+                logging.exception(f"Generation failed, shutting down: {e}")
+                raise e
+
             try:
                 data = json.loads(websocket.recv(1e-4))
                 if data["audio"]:
                     chunk = base64.b64decode(data["audio"])
                     self._stream_downloader_chunk_handler(chunk)
                     totalLength += len(chunk)
-            except TimeoutError:
+            except TimeoutError as e:
                 pass
 
         # Send end of stream
