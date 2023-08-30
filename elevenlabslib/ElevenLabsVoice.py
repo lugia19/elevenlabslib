@@ -224,7 +224,7 @@ class ElevenLabsVoice:
             BOS["voice_settings"] = voice_settings
 
         websocket = connect(
-            f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}",
+            f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}&optimize_streaming_latency={generationOptions.latencyOptimizationLevel}",
             additional_headers=self.linkedUser.headers
         )
         websocket.send(json.dumps(BOS))
