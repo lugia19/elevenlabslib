@@ -152,7 +152,7 @@ class ElevenLabsUser:
         subData = self.get_subscription_data()
         return subData["next_invoice"]
 
-    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
+    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
         """
         Gets a list of all voices registered to this account.
 
@@ -171,7 +171,7 @@ class ElevenLabsUser:
             allVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
         return allVoices
 
-    def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice]:
+    def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
         """
         Gets a list of voices this account can currently use for TTS.
 
