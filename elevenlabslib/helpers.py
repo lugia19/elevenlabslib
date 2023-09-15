@@ -5,7 +5,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List
 from warnings import warn
 
 import sounddevice as sd
@@ -162,6 +162,23 @@ class GenerationOptions:
 
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")
+
+@dataclasses.dataclass
+class WebsocketOptions:
+    """
+    This class holds the options for the websocket endpoint.
+
+    Parameters:
+        chunk_length_schedule (list[int], optional): Chunking schedule for generation. If you pass [50, 120, 500], the first audio chunk will be generated after recieving 50 characters, the second after 120 more (so 170 total), and the third onwards after 500. Defaults to [50], so always generating ASAP.
+        try_trigger_generation (bool, optional): Whether to try and generate the first chunk of audio at >50 characters, regardless of the chunk_length_schedule. Defaults to true.
+    """
+    try_trigger_generation: bool = True
+    chunk_length_schedule: List[int] = dataclasses.field(default_factory=lambda: [50])
+
+    def __post_init__(self):
+        for value in self.chunk_length_schedule:
+            if not(50 <= value <= 500):
+                raise ValueError("Chunk length outside the [50,500] range.")
 
 
 def run_ai_speech_classifier(audioBytes:bytes):

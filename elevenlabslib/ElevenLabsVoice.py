@@ -203,7 +203,7 @@ class ElevenLabsVoice:
         params["output_format"] = generationOptions.output_format
         return params
 
-    def _generate_websocket_connection(self, generationOptions:GenerationOptions=None) -> websockets.sync.client.ClientConnection:
+    def _generate_websocket_connection(self, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> websockets.sync.client.ClientConnection:
         """
         Generates a websocket connection for the input-streaming endpoint.
 
@@ -225,12 +225,13 @@ class ElevenLabsVoice:
             for key, currentValue in currentSettings.items():
                 overriddenValue = getattr(generationOptions, key, None)
                 voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
-
+        if websocketOptions is None:
+            websocketOptions = WebsocketOptions()
         BOS = {
             "text": " ",
-            "try_trigger_generation": True,
+            "try_trigger_generation": websocketOptions.try_trigger_generation,
             "generation_config": {
-                "chunk_length_schedule": [50]
+                "chunk_length_schedule": websocketOptions.chunk_length_schedule
             }
         }
 
@@ -326,7 +327,8 @@ class ElevenLabsVoice:
         Parameters:
             prompt (str): The text prompt to generate audio from.
             playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
-            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
+            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
+
 
         Returns:
            A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
@@ -349,7 +351,7 @@ class ElevenLabsVoice:
         playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
         return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
 
-    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str]], playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[str, Future[Any]]:
+    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str]], playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> tuple[str, Future[Any]]:
         """
         Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
 
@@ -361,7 +363,8 @@ class ElevenLabsVoice:
         Parameters:
             prompt (str|Iterator[str]): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming).
             playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
-            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
+            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
+            websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
 
         Returns:
             A tuple consisting of the historyID for the newly created item and a future which will hold the audio OutputStream (to control playback)
@@ -380,7 +383,9 @@ class ElevenLabsVoice:
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         else:
-            responseConnection = self._generate_websocket_connection(generationOptions)
+            if websocketOptions is None:
+                websocketOptions = WebsocketOptions()
+            responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
 
         streamer = _AudioChunkStreamer(playbackOptions)
         audioStreamFuture = concurrent.futures.Future()
