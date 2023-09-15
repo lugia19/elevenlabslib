@@ -135,7 +135,7 @@ class ElevenLabsVoice:
         """
         return self.get_info()["description"]
 
-    def edit_settings(self, stability:float=None, similarity_boost:float=None):
+    def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, speaker_boost:bool=None):
         """
         Note:
             If either argument is omitted, the current values will be used instead.
@@ -143,20 +143,25 @@ class ElevenLabsVoice:
         Edit the settings of the current voice.
 
         Args:
-            stability (float, optional): The stability of the voice.
-            similarity_boost (float, optional): The similarity boost of the voice.
+            stability (float, optional): The stability to set.
+            similarity_boost (float, optional): The similarity boost to set.
+            style (float, optional): The style to set (v2 models only).
+            speaker_boost (bool, optional): Whether to enable the speaker boost (v2 models only).
 
         Raises:
-            ValueError: If the provided stability or similarity_boost value is not between 0 and 1.
+            ValueError: If the provided values don't fit the correct ranges.
         """
         if stability is None or similarity_boost is None:
             oldSettings = self.get_settings()
             if stability is None: stability = oldSettings["stability"]
             if similarity_boost is None: stability = oldSettings["similarity_boost"]
+            if style is None: style = oldSettings["style"]
+            if speaker_boost is None: style = oldSettings["speaker_boost"]
 
-        if not(0 <= stability <= 1 and 0 <= similarity_boost <= 1):
-            raise ValueError("Please provide a value between 0 and 1.")
-        payload = {"stability": stability, "similarity_boost": similarity_boost}
+        for arg in (stability, similarity_boost, style):
+            if not (0 <= arg <= 1):
+                raise ValueError("Please provide a value between 0 and 1.")
+        payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "speaker_boost":speaker_boost}
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
     def _generate_payload(self, prompt:str, generationOptions:GenerationOptions=None):
