@@ -139,7 +139,7 @@ class GenerationOptions:
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
-    output_format:str = "mp3_44100"
+    output_format:str = "mp3_44100_128"
 
     def __post_init__(self):
         if self.model_id:
@@ -158,7 +158,7 @@ class GenerationOptions:
         if self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
 
-        validOutputFormats = ["mp3_44100", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+        validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")

@@ -681,11 +681,27 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
 
 #This way lies only madness.
 _defaultDType = "float32"
+
+
+
+#This is to work around an issue. May god have mercy on my soul.
+class BodgedSoundFile(sf.SoundFile):
+    def buffer_read(self, frames=-1, dtype=None):
+        from _soundfile import ffi as _ffi
+        frames = self._check_frames(frames, fill_value=None)
+        ctype = self._check_dtype(dtype)
+        cdata = _ffi.new(ctype + '[]', frames * self.channels)
+        read_frames = self._cdata_io('read', cdata, ctype, frames)
+        assert read_frames == frames, _ffi.buffer(cdata)
+        return _ffi.buffer(cdata)
+
+
+
 class _AudioChunkStreamer:
     def __init__(self,playbackOptions:PlaybackOptions):
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
+        self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
         self._bytesLock = threading.Lock()
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
@@ -707,7 +723,7 @@ class _AudioChunkStreamer:
         # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
+        self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
         for eventName, event in self._events.items():
             event.clear()
 
@@ -723,7 +739,7 @@ class _AudioChunkStreamer:
             logging.debug("Header maybe ready?")
             try:
                 with self._bytesLock:
-                    self._bytesSoundFile = sf.SoundFile(self._bytesFile)
+                    self._bytesSoundFile = BodgedSoundFile(self._bytesFile)
                     logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
                     self._frameSize = self._bytesSoundFile.channels * sf._ffi.sizeof(self._bytesSoundFile._check_dtype(_defaultDType))
                     self._events["soundFileReadyEvent"].set()
@@ -907,7 +923,31 @@ class _AudioChunkStreamer:
             outdata[:] = readData
     #THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD THE LOCK.
     def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=_defaultDType):
-        readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+        preReadFramePos = self._bytesSoundFile.tell()
+        preReadBytesPos = self._bytesFile.tell()
+        try:
+            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+        except (AssertionError, soundfile.LibsndfileError):
+            logging.debug("The following is some logging for a new and fun soundfile bug, which I (poorly) worked around. Lovely.")
+            logging.debug(f"Before the bug: frame {preReadFramePos} (byte {preReadBytesPos})")
+            logging.debug(f"After the bug: frame {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()})")
+            self._bytesLock.release()
+            time.sleep(0.1)
+            self._bytesLock.acquire()
+            self._bytesFile.seek(0)
+            newSF = BodgedSoundFile(self._bytesFile, mode="r")
+            newSF.seek(preReadFramePos)
+            self._bytesSoundFile = newSF
+            logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
+
+            try:
+                readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+            except (AssertionError, soundfile.LibsndfileError) as ea:
+                readData = ea.args[0]
+                #self._bytesSoundFile.seek(int((preReadFramePos-currentPos)), os.SEEK_CUR)
+
+
+
         if dataToRead * self._frameSize != len(readData):
             logging.debug(f"Expected {dataToRead * self._frameSize} bytes, but got back {len(readData)}")
         if len(readData) < dataToRead * self._frameSize:
@@ -918,7 +958,7 @@ class _AudioChunkStreamer:
                 logging.debug("We're not at the end of the file. Check if we're out of frames.")
                 logging.debug("Recreating soundfile...")
                 self._bytesFile.seek(0)
-                newSF = sf.SoundFile(self._bytesFile, mode="r")
+                newSF = BodgedSoundFile(self._bytesFile, mode="r")
                 newSF.seek(self._bytesSoundFile.tell() - int(len(readData) / self._frameSize))
                 if newSF.frames > self._bytesSoundFile.frames:
                     logging.debug("Frame counter was outdated.")
@@ -931,13 +971,7 @@ class _AudioChunkStreamer:
     def _get_data_from_download_thread(self) -> bytes:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()
-        try:
-            readData = self._soundFile_read_and_fix(_playbackBlockSize)
-        except AssertionError as en:
-            logging.debug("Mismatch in the number of frames read.")
-            logging.debug("This only seems to be an issue when it happens with files that have ID3v2 tags.")
-            logging.debug("Ignore it and return empty.")
-            readData = b""
+        readData = self._soundFile_read_and_fix(_playbackBlockSize)
 
         currentPos = self._bytesFile.tell()
         self._bytesFile.seek(0, os.SEEK_END)
