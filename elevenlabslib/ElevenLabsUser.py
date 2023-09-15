@@ -393,13 +393,14 @@ class ElevenLabsUser:
 
         return response.headers["generated_voice_id"], response.content
 
-    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple[str, bytes]], voiceName:str) -> ElevenLabsDesignedVoice:
+    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple[str, bytes]], voiceName:str, voiceDescription:str = "") -> ElevenLabsDesignedVoice:
         """
             Saves a voice generated via design_voice to your account, with the given name.
 
             Args:
                 temporaryVoiceID (str|tuple(str,bytes)): The temporary voiceID of the generated voice. It also supports directly passing the tuple from design_voice.
                 voiceName (str): The name you would like to give to the new voice.
+                voiceDescription (str): The description you would like to give to the new voice.
 
             Returns:
                 ElevenLabsDesignedVoice: The newly created voice
@@ -408,7 +409,8 @@ class ElevenLabsUser:
             temporaryVoiceID = temporaryVoiceID[0]
         payload = {
             "voice_name" : voiceName,
-            "generated_voice_id" : temporaryVoiceID
+            "generated_voice_id" : temporaryVoiceID,
+            "voice_description": voiceDescription
         }
         response = _api_json("/voice-generation/create-voice", headers=self._headers, jsonData=payload)
 

@@ -189,6 +189,15 @@ class ElevenLabsVoice:
 
         return payload
 
+    @staticmethod
+    def _generate_parameters(self, generationOptions:GenerationOptions = None):
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+        params = dict()
+        params["optimize_streaming_latency"] = generationOptions.latencyOptimizationLevel
+        params["output_format"] = generationOptions.output_format
+        return params
+
     def _generate_websocket_connection(self, generationOptions:GenerationOptions=None) -> websockets.sync.client.ClientConnection:
         """
         Generates a websocket connection for the input-streaming endpoint.
@@ -222,9 +231,12 @@ class ElevenLabsVoice:
 
         if voice_settings is not None:
             BOS["voice_settings"] = voice_settings
-
+        websocketURL = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}"
+        for key, value in self._generate_parameters(generationOptions).items():
+            if key != "output_format":
+                websocketURL += f"&{key}={value}"
         websocket = connect(
-            f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}&optimize_streaming_latency={generationOptions.latencyOptimizationLevel}",
+            websocketURL,
             additional_headers=self.linkedUser.headers
         )
         websocket.send(json.dumps(BOS))
@@ -250,7 +262,7 @@ class ElevenLabsVoice:
             generationOptions = GenerationOptions()
 
         payload = self._generate_payload(prompt, generationOptions)
-        params = {"optimize_streaming_latency": generationOptions.latencyOptimizationLevel}
+        params = self._generate_parameters(generationOptions)
 
         requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
@@ -281,7 +293,7 @@ class ElevenLabsVoice:
             generationOptions = GenerationOptions()
 
         payload = self._generate_payload(prompt, generationOptions)
-        params = {"optimize_streaming_latency":generationOptions.latencyOptimizationLevel}
+        params = self._generate_parameters(generationOptions)
 
         requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
@@ -318,7 +330,7 @@ class ElevenLabsVoice:
             generationOptions = GenerationOptions()
 
         audioData, historyID = self.generate_audio_v2(prompt, generationOptions)
-        outputStream = play_audio_bytes_v2(audioData, playbackOptions)
+        outputStream = play_audio_bytes_v2(audioData, playbackOptions, generationOptions)
 
         return audioData, historyID, outputStream
 
@@ -356,8 +368,10 @@ class ElevenLabsVoice:
             payload = self._generate_payload(prompt, generationOptions)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
+            params = self._generate_parameters(generationOptions)
+            params.pop("output_format", None)
             requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
-                                                    params={"optimize_streaming_latency": generationOptions.latencyOptimizationLevel})
+                                                    params = params)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         else:
@@ -851,8 +865,9 @@ class _AudioChunkStreamer:
                     logging.debug("Download (and playback) finished.")  # We're done.
                     raise sd.CallbackStop
                 else:
-                    logging.critical("Could not get an item within the timeout. Abort.")
-                    raise sd.CallbackAbort
+                    logging.error("Could not get an item within the timeout. This could lead to audio issues.")
+                    continue
+                    #raise sd.CallbackAbort
         #We've read an item from the queue.
 
         if not self._events["playbackStartFired"].is_set(): #Ensure the callback only fires once.

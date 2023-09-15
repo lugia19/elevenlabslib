@@ -115,7 +115,7 @@ class GenerationOptions:
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
-
+        output_format (str, optional): Pick the output format for the audio.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
@@ -139,6 +139,7 @@ class GenerationOptions:
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
+    output_format:str = "mp3_44100"
 
     def __post_init__(self):
         if self.model_id:
@@ -156,6 +157,11 @@ class GenerationOptions:
 
         if self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
+
+        validOutputFormats = ["mp3_44100", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+
+        if self.output_format not in validOutputFormats:
+            raise ValueError("Selected output format is not valid.")
 
 
 def run_ai_speech_classifier(audioBytes:bytes):
@@ -178,14 +184,14 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
 
     return play_audio_bytes_v2(audioData, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
-def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
+def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> sd.OutputStream:
     """
         Plays the given audio and calls the given functions.
 
         Parameters:
              audioData: The audio data to play
              playbackOptions: The playback options.
-
+             generationOptions (optional): The generation options (used for PCM output)
         Returns:
             None
         """
@@ -195,8 +201,9 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.
         for item in audioData:
             if isinstance(item, bytes):
                 audioData = item
-
-    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions)
+    if generationOptions is None:
+        generationOptions = GenerationOptions()
+    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions, generationOptions)
 
     if not playbackOptions.runInBackground:
         with playbackWrapper.stream:
@@ -234,8 +241,13 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:
-    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions):
-        soundFile = sf.SoundFile(io.BytesIO(audioData))
+    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions):
+        if "pcm" in generationOptions.output_format:
+            soundFile = sf.SoundFile(io.BytesIO(audioData), format="RAW", subtype="PCM_16",channels=1, samplerate=int(generationOptions.output_format.lower().replace("pcm_","")))
+        else:
+            soundFile = sf.SoundFile(io.BytesIO(audioData))
+
+
         soundFile.seek(0)
         self.onPlaybackStart = playbackOptions.onPlaybackStart
         self.onPlaybackEnd = playbackOptions.onPlaybackEnd
