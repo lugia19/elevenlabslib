@@ -404,7 +404,7 @@ class ElevenLabsVoice:
         if "mp3" in generationOptions.output_format:
             streamer = _Mp3Streamer(playbackOptions)
         else:
-            streamer = _PCMStreamer(playbackOptions, int(generationOptions.lower().replace("pcm_", "")))
+            streamer = _PCMStreamer(playbackOptions, int(generationOptions.output_format.lower().replace("pcm_", "")))
         audioStreamFuture = concurrent.futures.Future()
 
         if playbackOptions.runInBackground:
@@ -856,7 +856,7 @@ class _Mp3Streamer(_AudioStreamer):
                                 self._q.put(data)
                             break
                         else:
-                            logging.error("We're not at the end, yet we recieved less data than expected. THIS SHOULD NOT HAPPEN.")
+                            logging.debug("We're not at the end, yet we recieved less data than expected. This is a bug that was introduced with the update.")
             logging.debug("While loop done.")
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
