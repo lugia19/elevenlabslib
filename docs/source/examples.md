@@ -37,6 +37,26 @@ premadeVoice = user.get_voices_by_name("Rachel")[0]
 audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_24000"))
 ```
 
+## Use the Synthesizer utility class to manage playback
+```python
+from elevenlabslib import *
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+voice = user.get_available_voices()[0]
+
+#The synthesizer will manage streaming all the audio and playing it back in order.
+synthesizer = Synthesizer()     
+synthesizer.start()
+for i in range(10):
+    print(f"Loop {i}")
+    synthesizer.add_to_queue(voice, f"This is test {i}.")
+
+input("We're past the for loop already. Hit enter when you'd like to stop the playback.")
+synthesizer.abort()
+
+```
+
 ## Use input streaming with the OpenAI API
 Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c6abb08e8e0a) using the official wrapper.
 ```python
