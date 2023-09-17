@@ -178,216 +178,6 @@ class WebsocketOptions:
                 raise ValueError("Chunk length outside the [50,500] range.")
 
 
-def run_ai_speech_classifier(audioBytes:bytes):
-    """
-    Runs Elevenlabs' AI speech classifier on the provided audio data.
-    Parameters:
-        audioBytes: The bytes of the audio file (mp3, wav, most formats should work) you want to analzye
-
-    Returns:
-        Dict containing all the information returned by the tool (usually just the probability of it being AI generated)
-    """
-    data = io.BytesIO(audioBytes)
-    files = {'file': ('audioSample.mp3', data, 'audio/mpeg')}
-    response = _api_multipart("/moderation/ai-speech-classification", headers=None, data=None, filesData=files)
-    return response.json()
-
-def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-    warn("This function is deprecated. Please use play_audio_bytes_v2 instead. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
-
-    return play_audio_bytes_v2(audioData, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
-
-def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
-    """
-        Plays the given audio and calls the given functions.
-
-        Parameters:
-             audioData: The audio data to play
-             playbackOptions: The playback options.
-        Returns:
-            None
-        """
-
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(audioData, tuple):
-        for item in audioData:
-            if isinstance(item, bytes):
-                audioData = item
-    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions)
-
-    if not playbackOptions.runInBackground:
-        with playbackWrapper.stream:
-            playbackWrapper.endPlaybackEvent.wait()
-    else:
-        playbackWrapper.stream.start()
-        return playbackWrapper.stream
-
-
-def audio_is_pcm(audioData:bytes):
-    #Checks whether the provided audio file is PCM or some other format.
-    try:
-        soundfile.SoundFile(io.BytesIO(audioData))
-        return False
-    except soundfile.LibsndfileError:
-        return True
-
-def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
-    """
-    This function converts raw PCM audio to a WAV.
-
-    Parameters:
-        pcmData (bytes): The PCM audio data.
-        samplerate (int): The sample rate of the audio
-
-    Returns:
-        The bytes of the wav file.
-    """
-
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(pcmData, tuple):
-        for item in pcmData:
-            if isinstance(item, bytes):
-                pcmData = item
-
-    soundFile = sf.SoundFile(io.BytesIO(pcmData), format="RAW", subtype="PCM_16", channels=1, samplerate=samplerate)
-    wavIO = io.BytesIO()
-    sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
-
-    return wavIO.getvalue()
-
-def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
-    """
-    This function saves the audio data to the specified location OR file-like object.
-    soundfile is used for the conversion, so it supports any format it does.
-
-    Parameters:
-        audioData (bytes): The audio data.
-        saveLocation (str|BinaryIO): The path (or file-like object) where the data will be saved.
-        outputFormat (str): The format in which the audio will be saved.
-    """
-
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(audioData, tuple):
-        for item in audioData:
-            if isinstance(item, bytes):
-                audioData = item
-
-    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
-
-
-    if isinstance(saveLocation, str):
-        with open(saveLocation, "wb") as fp:
-            sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-    else:
-        sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-        if callable(getattr(saveLocation,"flush")):
-            saveLocation.flush()
-
-#This class just helps with the callback stuff.
-class _SDPlaybackWrapper:
-    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions):
-        soundFile = sf.SoundFile(io.BytesIO(audioData))
-
-        soundFile.seek(0)
-        self.onPlaybackStart = playbackOptions.onPlaybackStart
-        self.onPlaybackEnd = playbackOptions.onPlaybackEnd
-        self.startPlaybackEvent = threading.Event()
-        self.endPlaybackEvent = threading.Event()
-        self.data = soundFile.read(always_2d=True)
-        self.currentFrame = 0
-        self.stream = sd.OutputStream(channels=soundFile.channels,
-            callback=self.callback,
-            samplerate=soundFile.samplerate,
-            device=playbackOptions.portaudioDeviceID or sd.default.device,
-            finished_callback=self.end_playback)
-
-    def callback(self, outdata, frames, time, status):
-        if status:
-            print(status)
-
-        if not self.startPlaybackEvent.is_set():    #Ensure this is only fired once
-            self.startPlaybackEvent.set()
-            self.onPlaybackStart()
-
-        chunksize = min(len(self.data) - self.currentFrame, frames)
-        outdata[:chunksize] = self.data[self.currentFrame:self.currentFrame + chunksize]
-        if chunksize < frames:
-            outdata[chunksize:] = 0
-            raise sd.CallbackStop()
-        self.currentFrame += chunksize
-    def end_playback(self):
-        self.onPlaybackEnd()
-        self.endPlaybackEvent.set()
-
-class PeekQueue(queue.Queue):
-    def peek(self):
-        with self.mutex:
-            return list(self.queue)[0]
-
-    def snapshot(self):
-        with self.mutex:
-            return list(self.queue)
-
-
-def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:PeekQueue) -> requests.Response:
-    #Just a helper function which does all the concurrency stuff for TTS calls.
-    waitMultiplier = 1
-    try:
-        response = requestFunction()
-        response.raise_for_status() #Just in case the callable isn't a function that already does this.
-    except requests.exceptions.RequestException as e:
-        if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
-            logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
-            # Insert this in the user's "waiting to be generated" queue.
-            generationQueue.put(generationID)
-            response = None
-        else:
-            raise e
-
-    if response is None:
-        while True:
-            try:
-                peeked = generationQueue.peek()
-                if peeked == generationID:
-                    response = requestFunction()
-                    response.raise_for_status()
-                    generationQueue.get()
-                    break
-                else:
-                    logging.debug(f"\nCurrent first is {peeked}, we are {generationID}\n")
-                    logging.debug(f"\nOther items are first in queue, waiting for 0.3s\n")
-                    time.sleep(0.5)  # The time to peek at the queue is constant.
-            except requests.exceptions.RequestException as e:
-                if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
-                    logging.debug(f"\nWaiting for {0.5 * waitMultiplier}s\n")
-                    time.sleep(0.5 * waitMultiplier)  # Just wait a moment and try again.
-                    waitMultiplier += 1
-                    continue
-                raise e
-
-    return response
-
-#Taken from the official python library - https://github.com/elevenlabs/elevenlabs-python
-def text_chunker(chunks: Iterator[str]) -> Iterator[str]:
-    """Used during input streaming to chunk text blocks and set last char to space"""
-    splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
-    buffer = ""
-    for text in chunks:
-        if buffer.endswith(splitters):
-            yield buffer if buffer.endswith(" ") else buffer + " "
-            buffer = text
-        elif text.startswith(splitters):
-            output = buffer + text[0]
-            yield output if output.endswith(" ") else output + " "
-            buffer = text[1:]
-        else:
-            buffer += text
-    if buffer != "":
-        yield buffer + " "
-
-
-
 class Synthesizer:
     """
     This is a helper class, which allows you to queue up multiple audio generations.
@@ -485,3 +275,211 @@ class Synthesizer:
                 nextEvent.set()
                 self._currentStream = nextStreamFuture.result()
                 break
+
+def run_ai_speech_classifier(audioBytes:bytes):
+    """
+    Runs Elevenlabs' AI speech classifier on the provided audio data.
+    Parameters:
+        audioBytes: The bytes of the audio file (mp3, wav, most formats should work) you want to analzye
+
+    Returns:
+        Dict containing all the information returned by the tool (usually just the probability of it being AI generated)
+    """
+    data = io.BytesIO(audioBytes)
+    files = {'file': ('audioSample.mp3', data, 'audio/mpeg')}
+    response = _api_multipart("/moderation/ai-speech-classification", headers=None, data=None, filesData=files)
+    return response.json()
+
+def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
+                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
+    warn("This function is deprecated. Please use play_audio_bytes_v2 instead. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+
+    return play_audio_bytes_v2(audioData, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
+
+def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
+    """
+        Plays the given audio and calls the given functions.
+
+        Parameters:
+             audioData: The audio data to play
+             playbackOptions: The playback options.
+        Returns:
+            None
+        """
+
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
+    if isinstance(audioData, tuple):
+        for item in audioData:
+            if isinstance(item, bytes):
+                audioData = item
+    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions)
+
+    if not playbackOptions.runInBackground:
+        with playbackWrapper.stream:
+            playbackWrapper.endPlaybackEvent.wait()
+    else:
+        playbackWrapper.stream.start()
+        return playbackWrapper.stream
+
+
+def _audio_is_pcm(audioData:bytes):
+    #Checks whether the provided audio file is PCM or some other format.
+    try:
+        soundfile.SoundFile(io.BytesIO(audioData))
+        return False
+    except soundfile.LibsndfileError:
+        return True
+
+def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
+    """
+    This function converts raw PCM audio to a WAV.
+
+    Parameters:
+        pcmData (bytes): The PCM audio data.
+        samplerate (int): The sample rate of the audio
+
+    Returns:
+        The bytes of the wav file.
+    """
+
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
+    if isinstance(pcmData, tuple):
+        for item in pcmData:
+            if isinstance(item, bytes):
+                pcmData = item
+
+    soundFile = sf.SoundFile(io.BytesIO(pcmData), format="RAW", subtype="PCM_16", channels=1, samplerate=samplerate)
+    wavIO = io.BytesIO()
+    sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
+
+    return wavIO.getvalue()
+
+def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
+    """
+    This function saves the audio data to the specified location OR file-like object.
+    soundfile is used for the conversion, so it supports any format it does.
+
+    Parameters:
+        audioData (bytes): The audio data.
+        saveLocation (str|BinaryIO): The path (or file-like object) where the data will be saved.
+        outputFormat (str): The format in which the audio will be saved.
+    """
+
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
+    if isinstance(audioData, tuple):
+        for item in audioData:
+            if isinstance(item, bytes):
+                audioData = item
+
+    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
+
+
+    if isinstance(saveLocation, str):
+        with open(saveLocation, "wb") as fp:
+            sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
+    else:
+        sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
+        if callable(getattr(saveLocation,"flush")):
+            saveLocation.flush()
+
+#This class just helps with the callback stuff.
+class _SDPlaybackWrapper:
+    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions):
+        soundFile = sf.SoundFile(io.BytesIO(audioData))
+
+        soundFile.seek(0)
+        self.onPlaybackStart = playbackOptions.onPlaybackStart
+        self.onPlaybackEnd = playbackOptions.onPlaybackEnd
+        self.startPlaybackEvent = threading.Event()
+        self.endPlaybackEvent = threading.Event()
+        self.data = soundFile.read(always_2d=True)
+        self.currentFrame = 0
+        self.stream = sd.OutputStream(channels=soundFile.channels,
+            callback=self.callback,
+            samplerate=soundFile.samplerate,
+            device=playbackOptions.portaudioDeviceID or sd.default.device,
+            finished_callback=self.end_playback)
+
+    def callback(self, outdata, frames, time, status):
+        if status:
+            print(status)
+
+        if not self.startPlaybackEvent.is_set():    #Ensure this is only fired once
+            self.startPlaybackEvent.set()
+            self.onPlaybackStart()
+
+        chunksize = min(len(self.data) - self.currentFrame, frames)
+        outdata[:chunksize] = self.data[self.currentFrame:self.currentFrame + chunksize]
+        if chunksize < frames:
+            outdata[chunksize:] = 0
+            raise sd.CallbackStop()
+        self.currentFrame += chunksize
+    def end_playback(self):
+        self.onPlaybackEnd()
+        self.endPlaybackEvent.set()
+
+class _PeekQueue(queue.Queue):
+    def peek(self):
+        with self.mutex:
+            return list(self.queue)[0]
+
+    def snapshot(self):
+        with self.mutex:
+            return list(self.queue)
+
+
+def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:_PeekQueue) -> requests.Response:
+    #Just a helper function which does all the concurrency stuff for TTS calls.
+    waitMultiplier = 1
+    try:
+        response = requestFunction()
+        response.raise_for_status() #Just in case the callable isn't a function that already does this.
+    except requests.exceptions.RequestException as e:
+        if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
+            logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
+            # Insert this in the user's "waiting to be generated" queue.
+            generationQueue.put(generationID)
+            response = None
+        else:
+            raise e
+
+    if response is None:
+        while True:
+            try:
+                peeked = generationQueue.peek()
+                if peeked == generationID:
+                    response = requestFunction()
+                    response.raise_for_status()
+                    generationQueue.get()
+                    break
+                else:
+                    logging.debug(f"\nCurrent first is {peeked}, we are {generationID}\n")
+                    logging.debug(f"\nOther items are first in queue, waiting for 0.3s\n")
+                    time.sleep(0.5)  # The time to peek at the queue is constant.
+            except requests.exceptions.RequestException as e:
+                if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
+                    logging.debug(f"\nWaiting for {0.5 * waitMultiplier}s\n")
+                    time.sleep(0.5 * waitMultiplier)  # Just wait a moment and try again.
+                    waitMultiplier += 1
+                    continue
+                raise e
+
+    return response
+
+#Taken from the official python library - https://github.com/elevenlabs/elevenlabs-python
+def _text_chunker(chunks: Iterator[str]) -> Iterator[str]:
+    """Used during input streaming to chunk text blocks and set last char to space"""
+    splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
+    buffer = ""
+    for text in chunks:
+        if buffer.endswith(splitters):
+            yield buffer if buffer.endswith(" ") else buffer + " "
+            buffer = text
+        elif text.startswith(splitters):
+            output = buffer + text[0]
+            yield output if output.endswith(" ") else output + " "
+            buffer = text[1:]
+        else:
+            buffer += text
+    if buffer != "":
+        yield buffer + " "

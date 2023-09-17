@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _PeekQueue
 
 
 class ElevenLabsUser:
@@ -41,7 +41,7 @@ class ElevenLabsUser:
         for key, value in defaultHeaders.items():
             self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
-        self.generation_queue = PeekQueue()
+        self.generation_queue = _PeekQueue()
 
         try:
             self.get_available_voices()

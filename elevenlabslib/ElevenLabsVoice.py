@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -732,7 +732,7 @@ class _AudioStreamer:
         totalLength = 0
         logging.debug("Starting iter...")
 
-        for text_chunk in text_chunker(textIterator):
+        for text_chunk in _text_chunker(textIterator):
             data = dict(text=text_chunk, try_trigger_generation=True)
             try:
                 websocket.send(json.dumps(data))
@@ -1065,7 +1065,7 @@ class _PCMStreamer(_AudioStreamer):
 
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
-            logging.debug(stream.active)
+
         logging.debug("Stream done.")
         return
 
@@ -1080,14 +1080,20 @@ class _PCMStreamer(_AudioStreamer):
 
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
+        self._stream_downloader_chunk_handler(b"")
         return
 
     def _stream_downloader_chunk_handler(self, chunk:bytes):
         #Split the code for easier handling
         self._buffer += chunk
-        while len(self._buffer) >= _downloadChunkSize:
-            frame_data, self._buffer = self._buffer[:_downloadChunkSize], self._buffer[_downloadChunkSize:]
+        while len(self._buffer) >= _playbackBlockSize*2:    #*2 due to the audio frame size
+            frame_data, self._buffer = self._buffer[:_playbackBlockSize*2], self._buffer[_playbackBlockSize*2:]
             audioData = numpy.frombuffer(frame_data, dtype=self._dtype)
+            self._q.put(audioData.reshape(-1, self._channels))
+
+        if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
+            logging.debug("Download is done, dump the remaining audio in the queue.")
+            audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
             self._q.put(audioData.reshape(-1, self._channels))
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
@@ -1127,6 +1133,6 @@ class _PCMStreamer(_AudioStreamer):
             outdata[:len(readData)] = readData
             outdata[len(readData):].fill(0)
         elif len(readData) == 0:
-            logging.debug("Callback got no data from the queue. Checking if playback is over...")
+            logging.warning("Callback got empty data from the queue.")
         else:
             outdata[:] = readData
