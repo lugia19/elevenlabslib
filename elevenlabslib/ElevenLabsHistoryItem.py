@@ -121,6 +121,13 @@ class ElevenLabsHistoryItem:
         Note:
             The audio will be cached so that it's not downloaded every time this is called.
 
+        Error:
+            The history currently saves PCM generations directly, without any header data.
+
+            This means they cannot be played back, unless you convert them yourself, using pcm_to_wav.
+
+            But, since the samplerate isn't saved either, you'll basically just need to guess which samplerate it is.
+
         Caution:
             If you're looking to download multiple history items, use ElevenLabsUser.download_history_items() instead.
             That will call a different endpoint, optimized for multiple downloads.

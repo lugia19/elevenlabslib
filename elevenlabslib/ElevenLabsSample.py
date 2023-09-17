@@ -53,7 +53,7 @@ class ElevenLabsSample:
             The audio will be cached so that it's not downloaded every time this is called.
 
         Returns:
-            bytes: a bytes object containing the audio in mp3 format.
+            bytes: a bytes object containing the audio in whatever format it was originally uploaded in.
         """
         if self._audioData is None:
             response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
