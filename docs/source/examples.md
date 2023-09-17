@@ -26,6 +26,17 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 historyItem.delete()
 ```
 
+## Generate audio in PCM format
+```python
+from elevenlabslib import *
+
+api_key = "api_key"
+user = ElevenLabsUser(api_key)
+premadeVoice = user.get_voices_by_name("Rachel")[0]
+
+audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_24000"))
+```
+
 ## Use input streaming with the OpenAI API
 Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c6abb08e8e0a) using the official wrapper.
 ```python
@@ -54,8 +65,11 @@ voice = user.get_available_voices()[0]
 
 # Stream the audio
 # WARNING: The historyID will be "no_history_id_available", due to the API currently not returning it.
-historyID, AudioStreamFuture = voice.generate_stream_audio_v2(text_stream, PlaybackOptions(runInBackground=False), GenerationOptions(latencyOptimizationLevel=4))
-
+historyID, AudioStreamFuture = voice.generate_stream_audio_v2(
+    text_stream, PlaybackOptions(runInBackground=False),
+    GenerationOptions(latencyOptimizationLevel=4),
+    WebsocketOptions(try_trigger_generation=True, chunk_length_schedule=[50])
+)
 ```
 
 ## Generate an audio with the (alpha) V2 english model and its new settings

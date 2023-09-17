@@ -45,7 +45,7 @@ class ElevenLabsHistoryItem:
 
     @property
     def settings_used(self):
-        warn("This is deprecated in favor of generation_settings, which returns a GenerationOptions object instead.")
+        warn("This is deprecated in favor of generation_settings, which returns a GenerationOptions object instead.", DeprecationWarning)
         return self._settingsUsed
 
     @property
@@ -135,7 +135,7 @@ class ElevenLabsHistoryItem:
 
     def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
                      onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-        warn("This function is outdated. Please use play_audio_v2() instead.")
+        warn("This function is outdated. Please use play_audio_v2() instead.", DeprecationWarning)
         return self.play_audio_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
     def play_audio_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:

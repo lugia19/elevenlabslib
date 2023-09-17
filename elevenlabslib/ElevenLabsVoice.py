@@ -295,6 +295,8 @@ class ElevenLabsVoice:
         Returns:
             A tuple consisting of the bytes of the audio file and its historyID.
 
+        Note:
+            If using PCM as the output_format, the return audio bytes are a WAV.
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
@@ -305,8 +307,12 @@ class ElevenLabsVoice:
         requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
         response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        audioData = response.content
 
-        return response.content, response.headers["history-item-id"]
+        if "pcm" in generationOptions.output_format:
+            audioData = pcm_to_wav(audioData, int(generationOptions.output_format.lower().replace("pcm_","")))
+
+        return audioData, response.headers["history-item-id"]
 
 
 
@@ -333,12 +339,15 @@ class ElevenLabsVoice:
 
         Returns:
            A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
+
+        Note:
+            If using PCM as the output_format, the return audio bytes are a WAV.
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
         audioData, historyID = self.generate_audio_v2(prompt, generationOptions)
-        outputStream = play_audio_bytes_v2(audioData, playbackOptions, generationOptions)
+        outputStream = play_audio_bytes_v2(audioData, playbackOptions)
 
         return audioData, historyID, outputStream
 
@@ -426,7 +435,7 @@ class ElevenLabsVoice:
 
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
                                 onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-        warn("This function is deprecated. Use play_preview_v2 instead.")
+        warn("This function is deprecated. Use play_preview_v2 instead.", DeprecationWarning)
         return self.play_preview_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
     def play_preview_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:

@@ -115,16 +115,11 @@ class GenerationOptions:
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
-        output_format (str, optional): Pick the output format for the audio.
+        output_format (str, optional): Pick the output format for the audio. Certain formats (mp3_44100_192 and pcm_44100) are restricted depending on your subscription tier.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
-        The levels are as follows:
-            - 0: Normal, no optimizations applied
-            - 1: 50% of possible latency optimization
-            - 2: 75% of possible latency optimization
-            - 3: 100% of possible latency optimization
-            - 4: 100% + text normalizer disabled (best latency but can mispronounce numbers/dates)
+        Level 4 might also mispronounce numbers/dates.
 
     Warning:
         The style and use_speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
@@ -201,14 +196,13 @@ def play_audio_bytes(audioData:bytes, playInBackground:bool, portaudioDeviceID:O
 
     return play_audio_bytes_v2(audioData, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
-def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> sd.OutputStream:
+def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
     """
         Plays the given audio and calls the given functions.
 
         Parameters:
              audioData: The audio data to play
              playbackOptions: The playback options.
-             generationOptions (optional): The generation options (used for PCM output)
         Returns:
             None
         """
@@ -218,9 +212,7 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions, genera
         for item in audioData:
             if isinstance(item, bytes):
                 audioData = item
-    if generationOptions is None:
-        generationOptions = GenerationOptions()
-    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions, generationOptions)
+    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions)
 
     if not playbackOptions.runInBackground:
         with playbackWrapper.stream:
@@ -229,15 +221,39 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions, genera
         playbackWrapper.stream.start()
         return playbackWrapper.stream
 
+def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
+    """
+    This function converts raw PCM audio to a WAV.
+
+    Parameters:
+        pcmData (bytes): The PCM audio data.
+        samplerate (int): The sample rate of the audio
+
+    Returns:
+        The bytes of the wav file.
+    """
+
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
+    if isinstance(pcmData, tuple):
+        for item in pcmData:
+            if isinstance(item, bytes):
+                pcmData = item
+
+    soundFile = sf.SoundFile(io.BytesIO(pcmData), format="RAW", subtype="PCM_16", channels=1, samplerate=samplerate)
+    wavIO = io.BytesIO()
+    sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
+
+    return wavIO.getvalue()
+
 def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
     """
     This function saves the audio data to the specified location OR file-like object.
     soundfile is used for the conversion, so it supports any format it does.
 
     Parameters:
-        audioData: The audio data.
-        saveLocation: The path (or file-like object) where the data will be saved.
-        outputFormat: The format in which the audio will be saved
+        audioData (bytes): The audio data.
+        saveLocation (str|BinaryIO): The path (or file-like object) where the data will be saved.
+        outputFormat (str): The format in which the audio will be saved.
     """
 
     # Let's make sure the user didn't just forward a tuple from one of the other functions...
@@ -247,6 +263,7 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
                 audioData = item
 
     tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
+
 
     if isinstance(saveLocation, str):
         with open(saveLocation, "wb") as fp:
@@ -258,12 +275,8 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:
-    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions):
-        if "pcm" in generationOptions.output_format:
-            soundFile = sf.SoundFile(io.BytesIO(audioData), format="RAW", subtype="PCM_16",channels=1, samplerate=int(generationOptions.output_format.lower().replace("pcm_","")))
-        else:
-            soundFile = sf.SoundFile(io.BytesIO(audioData))
-
+    def __init__(self, audioData:bytes, playbackOptions:PlaybackOptions):
+        soundFile = sf.SoundFile(io.BytesIO(audioData))
 
         soundFile.seek(0)
         self.onPlaybackStart = playbackOptions.onPlaybackStart
