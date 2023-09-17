@@ -402,7 +402,7 @@ class _SDPlaybackWrapper:
 
     def callback(self, outdata, frames, time, status):
         if status:
-            print(status)
+            logging.warning(status)
 
         if not self.startPlaybackEvent.is_set():    #Ensure this is only fired once
             self.startPlaybackEvent.set()
