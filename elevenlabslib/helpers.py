@@ -16,14 +16,15 @@ import os
 
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
-api_endpoint = "https://api.elevenlabs.io/v1"
-default_headers = {'accept': '*/*'}
+apiEndpoint = "https://api.elevenlabs.io/v1"
+defaultHeaders = {'accept': '*/*'}
+subscriptionTiers = ["free","starter","creator","independent_publisher","growing_business","enterprise"]
 
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]
     if path[0] != "/":
         path = "/"+path
-    argsDict["url"] = api_endpoint + path
+    argsDict["url"] = apiEndpoint + path
     argsDict.pop("path")
 
     response:requests.Response = requestMethod(**argsDict)
@@ -115,7 +116,7 @@ class GenerationOptions:
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
-        output_format (str, optional): Pick the output format for the audio. Certain formats (mp3_44100_192 and pcm_44100) are restricted depending on your subscription tier.
+        output_format (str, optional): Output format for the audio. mp3_highest and pcm_highest will automatically use the highest quality of that format you have available.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
@@ -134,7 +135,7 @@ class GenerationOptions:
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
-    output_format:str = "mp3_44100_128"
+    output_format:str = "mp3_highest"
 
     def __post_init__(self):
         if self.model_id:
@@ -153,7 +154,7 @@ class GenerationOptions:
         if self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
 
-        validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+        validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "mp3_highest","pcm_highest"]
 
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")
@@ -220,6 +221,15 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.
     else:
         playbackWrapper.stream.start()
         return playbackWrapper.stream
+
+
+def audio_is_pcm(audioData:bytes):
+    #Checks whether the provided audio file is PCM or some other format.
+    try:
+        soundfile.SoundFile(io.BytesIO(audioData))
+        return False
+    except soundfile.LibsndfileError:
+        return True
 
 def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
     """

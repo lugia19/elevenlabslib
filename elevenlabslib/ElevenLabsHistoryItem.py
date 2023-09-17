@@ -123,11 +123,7 @@ class ElevenLabsHistoryItem:
 
         Error:
             The history currently saves PCM generations directly, without any header data.
-
-            This means they cannot be played back, unless you convert them yourself, using pcm_to_wav.
-
-            But, since the samplerate isn't saved either, you'll basically just need to guess which samplerate it is.
-
+            Since the samplerate isn't saved either, you'll basically just need to guess which samplerate it is if trying to play it back.
         Caution:
             If you're looking to download multiple history items, use ElevenLabsUser.download_history_items() instead.
             That will call a different endpoint, optimized for multiple downloads.
@@ -153,8 +149,16 @@ class ElevenLabsHistoryItem:
             playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
         Returns:
             The sounddevice OutputStream of the playback.
+
+        Error:
+            Due to the lack of samplerate information, when playing back a generation created with PCM, the library assumes it was made using the highest samplerate available to your account.
         """
-        return play_audio_bytes_v2(self.get_audio_bytes(), playbackOptions)
+        audioBytes = self.get_audio_bytes()
+        if audio_is_pcm(audioBytes):
+            sampleRate = int(self._parentUser.get_real_audio_format(GenerationOptions(output_format="pcm_highest")).output_format.lower().replace("pcm_",""))
+            audioBytes = pcm_to_wav(audioBytes, sampleRate)
+
+        return play_audio_bytes_v2(audioBytes, playbackOptions)
 
     def fetch_feedback(self):
         """

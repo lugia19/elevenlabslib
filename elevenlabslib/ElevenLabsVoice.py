@@ -195,11 +195,11 @@ class ElevenLabsVoice:
 
         return payload
 
-    @staticmethod
-    def _generate_parameters(generationOptions:GenerationOptions = None):
+    def _generate_parameters(self, generationOptions:GenerationOptions = None):
         if generationOptions is None:
             generationOptions = GenerationOptions()
         params = dict()
+        generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
         params["optimize_streaming_latency"] = generationOptions.latencyOptimizationLevel
         params["output_format"] = generationOptions.output_format
         return params
@@ -301,6 +301,9 @@ class ElevenLabsVoice:
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
+        #Since we need the sample rate directly, make sure it's a real one.
+        generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
+
         payload = self._generate_payload(prompt, generationOptions)
         params = self._generate_parameters(generationOptions)
 
@@ -382,12 +385,15 @@ class ElevenLabsVoice:
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
+        #We need the real sample rate.
+        generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
+
         if isinstance(prompt, str):
             payload = self._generate_payload(prompt, generationOptions)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
-            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
+            requestFunction = lambda: requests.post(apiEndpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
                                                     params = params)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
@@ -398,7 +404,7 @@ class ElevenLabsVoice:
         if "mp3" in generationOptions.output_format:
             streamer = _Mp3Streamer(playbackOptions)
         else:
-            streamer = _PCMStreamer(playbackOptions, generationOptions)
+            streamer = _PCMStreamer(playbackOptions, int(generationOptions.lower().replace("pcm_", "")))
         audioStreamFuture = concurrent.futures.Future()
 
         if playbackOptions.runInBackground:
@@ -1020,13 +1026,13 @@ class _Mp3Streamer(_AudioStreamer):
         return readData
 
 class _PCMStreamer(_AudioStreamer):
-    def __init__(self,playbackOptions:PlaybackOptions, generationOptions:GenerationOptions):
+    def __init__(self,playbackOptions:PlaybackOptions, samplerate:int):
         super().__init__()
         self._q = queue.Queue()
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
         self._dtype = "int16"
-        self._samplerate = int(generationOptions.output_format.lower().replace("pcm_",""))
+        self._samplerate = samplerate
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
         self._channels = 1
         self._events: dict[str, threading.Event] = {

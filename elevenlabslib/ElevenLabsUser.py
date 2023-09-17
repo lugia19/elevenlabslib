@@ -38,7 +38,7 @@ class ElevenLabsUser:
         """
         self._xi_api_key = xi_api_key
         self._headers = dict()
-        for key, value in default_headers.items():
+        for key, value in defaultHeaders.items():
             self._headers[key] = value
         self._headers["xi-api-key"] = self._xi_api_key
         self.generation_queue = PeekQueue()
@@ -504,3 +504,26 @@ class ElevenLabsUser:
             if e.response.json()["detail"]["status"] == "voice_already_cloned":
                 raise ValueError(f"You've already added the voice {voiceID} to your account!")
             raise e
+
+    def get_real_audio_format(self, generationOptions:GenerationOptions) -> GenerationOptions:
+        """
+        Parameters:
+            generationOptions (GenerationOptions): A GenerationOptions object.
+
+        Returns:
+            A GenerationOptions object with a real audio format (if the original was mp3_highest or pcm_highest, it's modified accordingly, otherwise returned directly)
+        """
+        if "highest" in generationOptions.output_format:
+            subscriptionTier = self.get_subscription_data()["tier"]
+            if "mp3" in generationOptions.output_format:
+                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("creator"):
+                    generationOptions.output_format = "mp3_44100_192"
+                else:
+                    generationOptions.output_format = "mp3_44100_128"
+            else:
+                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("independent_publisher"):
+                    generationOptions.output_format = "pcm_44100"
+                else:
+                    generationOptions.output_format = "pcm_24000"
+
+        return generationOptions
