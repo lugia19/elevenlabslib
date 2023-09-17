@@ -34,7 +34,8 @@ api_key = "api_key"
 user = ElevenLabsUser(api_key)
 premadeVoice = user.get_voices_by_name("Rachel")[0]
 
-audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_24000"))
+#pcm_highest (and mp3_highest) will automatically select the highest quality available to your account.
+audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_highest"))
 ```
 
 ## Use the Synthesizer utility class to manage playback
