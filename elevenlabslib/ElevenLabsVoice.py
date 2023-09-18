@@ -152,7 +152,8 @@ class ElevenLabsVoice:
         Raises:
             ValueError: If the provided values don't fit the correct ranges.
         """
-        if stability is None or similarity_boost is None:
+
+        if None in (stability, similarity_boost, style, speaker_boost) is None:
             oldSettings = self.get_settings()
             if stability is None: stability = oldSettings["stability"]
             if similarity_boost is None: stability = oldSettings["similarity_boost"]
