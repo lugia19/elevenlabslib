@@ -19,7 +19,8 @@ from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
 apiEndpoint = "https://api.elevenlabs.io/v1"
 defaultHeaders = {'accept': '*/*'}
-subscriptionTiers = ["free","starter","creator","independent_publisher","growing_business","enterprise"]
+#FYI, "pro" = "independent_publisher"
+subscriptionTiers = ["free","starter","creator","pro","growing_business","enterprise"]
 
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]

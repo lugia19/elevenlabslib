@@ -521,7 +521,7 @@ class ElevenLabsUser:
                 else:
                     generationOptions.output_format = "mp3_44100_128"
             else:
-                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("independent_publisher"):
+                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("pro"):
                     generationOptions.output_format = "pcm_44100"
                 else:
                     generationOptions.output_format = "pcm_24000"
