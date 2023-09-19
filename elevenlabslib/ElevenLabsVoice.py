@@ -253,8 +253,7 @@ class ElevenLabsVoice:
             BOS["voice_settings"] = voice_settings
         websocketURL = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}"
         for key, value in self._generate_parameters(generationOptions).items():
-            if key != "output_format":
-                websocketURL += f"&{key}={value}"
+            websocketURL += f"&{key}={value}"
         websocket = connect(
             websocketURL,
             additional_headers=self.linkedUser.headers
@@ -737,7 +736,6 @@ class _AudioStreamer:
             totalLength += len(chunk)
 
         logging.debug("Download finished - " + str(totalLength) + ".")
-        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
         self._events["downloadDoneEvent"].set()
         return
 
@@ -777,7 +775,6 @@ class _AudioStreamer:
                 break
 
         logging.debug("Download finished - " + str(totalLength) + ".")
-        self._events["blockDataAvailable"].set()  # Ensure that the other thread knows data is available
         self._events["downloadDoneEvent"].set()
 
     def _stream_downloader_chunk_handler(self, chunk):
@@ -806,6 +803,15 @@ class _Mp3Streamer(_AudioStreamer):
             "blockDataAvailable": threading.Event(),
             "playbackStartFired": threading.Event()
         }
+
+    def _stream_downloader_function(self, streamedResponse: requests.Response):
+        super()._stream_downloader_function(streamedResponse)
+        self._events["blockDataAvailable"].set()
+        return
+
+    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
+        super()._stream_downloader_function_websockets(websocket, textIterator)
+        self._events["blockDataAvailable"].set()
 
     def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
@@ -1056,6 +1062,14 @@ class _PCMStreamer(_AudioStreamer):
         }
         self._buffer = b""
 
+    def _stream_downloader_function(self, streamedResponse:requests.Response):
+        super()._stream_downloader_function(streamedResponse)
+        self._stream_downloader_chunk_handler(b"")
+
+    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
+        super()._stream_downloader_function_websockets(websocket, textIterator)
+        self._stream_downloader_chunk_handler(b"")
+
     def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
         # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
@@ -1080,20 +1094,6 @@ class _PCMStreamer(_AudioStreamer):
             self._onPlaybackEnd()
 
         logging.debug("Stream done.")
-        return
-
-    def _stream_downloader_function(self, streamedResponse:requests.Response):
-        # This is the function running in the download thread.
-        streamedResponse.raise_for_status()
-        totalLength = 0
-        logging.debug("Starting iter...")
-        for chunk in streamedResponse.iter_content(chunk_size=_downloadChunkSize):
-            self._stream_downloader_chunk_handler(chunk)
-            totalLength += len(chunk)
-
-        logging.debug("Download finished - " + str(totalLength) + ".")
-        self._events["downloadDoneEvent"].set()
-        self._stream_downloader_chunk_handler(b"")
         return
 
     def _stream_downloader_chunk_handler(self, chunk:bytes):
