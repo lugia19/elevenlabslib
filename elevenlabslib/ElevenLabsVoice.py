@@ -108,6 +108,18 @@ class ElevenLabsVoice:
             dict: The current generation settings of the voice (stability and clarity).
         """
         response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
+        settingsDict:dict = response.json()
+
+        for key in ["stability", "similarity_boost"]:
+            if settingsDict.get(key, None) is None:
+                settingsDict[key] = 0.5
+
+        if settingsDict.get("style", None) is None:
+            settingsDict["style"] = 0.0
+
+        if settingsDict.get("use_speaker_boost", None) is None:
+            settingsDict["use_speaker_boost"] = False
+
         return response.json()
     def get_info(self) -> dict:
         """
@@ -136,7 +148,7 @@ class ElevenLabsVoice:
         """
         return self.get_info()["description"]
 
-    def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, speaker_boost:bool=None):
+    def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, use_speaker_boost:bool=None):
         """
         Note:
             If either argument is omitted, the current values will be used instead.
@@ -147,23 +159,23 @@ class ElevenLabsVoice:
             stability (float, optional): The stability to set.
             similarity_boost (float, optional): The similarity boost to set.
             style (float, optional): The style to set (v2 models only).
-            speaker_boost (bool, optional): Whether to enable the speaker boost (v2 models only).
+            use_speaker_boost (bool, optional): Whether to enable the speaker boost (v2 models only).
 
         Raises:
             ValueError: If the provided values don't fit the correct ranges.
         """
 
-        if None in (stability, similarity_boost, style, speaker_boost) is None:
+        if None in (stability, similarity_boost, style, use_speaker_boost):
             oldSettings = self.get_settings()
             if stability is None: stability = oldSettings["stability"]
             if similarity_boost is None: stability = oldSettings["similarity_boost"]
             if style is None: style = oldSettings["style"]
-            if speaker_boost is None: style = oldSettings["speaker_boost"]
+            if use_speaker_boost is None: style = oldSettings["use_speaker_boost"]
 
         for arg in (stability, similarity_boost, style):
             if not (0 <= arg <= 1):
                 raise ValueError("Please provide a value between 0 and 1.")
-        payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "speaker_boost":speaker_boost}
+        payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "use_speaker_boost":use_speaker_boost}
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
 
     def _generate_payload(self, prompt:str, generationOptions:GenerationOptions=None):
