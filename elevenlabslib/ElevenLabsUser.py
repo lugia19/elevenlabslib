@@ -40,7 +40,7 @@ class ElevenLabsUser:
         self._headers = dict()
         for key, value in defaultHeaders.items():
             self._headers[key] = value
-        self._headers["xi-api-key"] = self._xi_api_key
+        self._headers["xi-api-key"] = self.xi_api_key
         self.generation_queue = _PeekQueue()
 
         try:
@@ -65,6 +65,10 @@ class ElevenLabsUser:
             dict: The headers used for API requests.
         """
         return self._headers
+
+    @property
+    def xi_api_key(self) -> str:
+        return self._xi_api_key
 
     def get_available_models(self) -> list[dict]:
         warn("This function is deprecated. Use get_models instead.", DeprecationWarning)
