@@ -130,8 +130,7 @@ class GenerationOptions:
         Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
 
     Warning:
-        Using pcm_highest and mp3_highest will result in an extra API to the user info endpoint _every time a generation is made_.
-        If it's used many times over, please use user.get_real_audio_format() to get the result directly, and re-use it instead.
+        Using pcm_highest and mp3_highest will cache the resulting quality for the user object. You can use user.update_audio_quality() to force an update.
     """
     model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
     latencyOptimizationLevel: int = 0
@@ -140,7 +139,7 @@ class GenerationOptions:
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
-    output_format:str = "mp3_44100_128"
+    output_format:str = "mp3_highest"
 
     def __post_init__(self):
         if self.model_id:

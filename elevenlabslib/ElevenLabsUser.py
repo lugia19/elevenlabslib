@@ -42,7 +42,7 @@ class ElevenLabsUser:
             self._headers[key] = value
         self._headers["xi-api-key"] = self.xi_api_key
         self.generation_queue = _PeekQueue()
-
+        self._subscriptionTier = None           #Used to cache the result for mp3/pcm_highest
         try:
             self.get_available_voices()
         except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
@@ -70,6 +70,66 @@ class ElevenLabsUser:
     def xi_api_key(self) -> str:
         return self._xi_api_key
 
+
+    #Userdata-centric functions
+    def get_user_data(self) -> dict:
+        """
+        Returns:
+             dict: All the information returned by the /v1/user endpoint.
+        """
+        response = _api_get("/user/", self._headers)
+        userData = response.json()
+        return userData
+
+    def get_subscription_data(self) -> dict:
+        """
+        Returns:
+             dict: All the information returned by the /v1/user/subscription endpoint.
+        """
+        response = _api_get("/user/subscription", self._headers)
+        subscriptionData = response.json()
+        return subscriptionData
+
+    def get_character_info(self) -> (int, int, bool):
+        """
+        Returns:
+            (int, int, bool): The number of characters used up, the maximum, and if the maximum can be increased.
+        """
+        subData = self.get_subscription_data()
+        return subData["character_count"], subData["character_limit"], (subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"])
+
+    def get_current_character_count(self) -> int:
+        warn("Deprecated in favor of user.get_character_info().", DeprecationWarning)
+        subData = self.get_subscription_data()
+        return subData["character_count"]
+
+    def get_character_limit(self) -> int:
+        warn("Deprecated in favor of user.get_character_info().", DeprecationWarning)
+        subData = self.get_subscription_data()
+        return subData["character_limit"]
+
+    def get_can_extend_character_limit(self) -> bool:
+        warn("Deprecated in favor of user.get_character_info().", DeprecationWarning)
+        subData = self.get_subscription_data()
+        return subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"]
+
+    def get_voice_clone_available(self) -> bool:
+        """
+        Returns:
+            bool: True if the user can use instant voice cloning, False otherwise.
+        """
+        subData = self.get_subscription_data()
+        return subData["can_use_instant_voice_cloning"]
+
+    def get_next_invoice(self) -> dict | None:
+        """
+        Returns:
+            dict | None: The next invoice's data, or None if there is no next invoice.
+        """
+        subData = self.get_subscription_data()
+        return subData["next_invoice"]
+
+    #Other endpoints
     def get_available_models(self) -> list[dict]:
         warn("This function is deprecated. Use get_models instead.", DeprecationWarning)
         response = _api_get("/models", self._headers)
@@ -97,64 +157,6 @@ class ElevenLabsUser:
             if modelData["model_id"] == modelID:
                 return ElevenLabsModel(modelData, self)
         raise ValueError("This model does not exist or is not available for your account.")
-
-    def get_user_data(self) -> dict:
-        """
-        Returns:
-             dict: All the information returned by the /v1/user endpoint.
-        """
-        response = _api_get("/user/", self._headers)
-        userData = response.json()
-        return userData
-
-    def get_subscription_data(self) -> dict:
-        """
-        Returns:
-             dict: All the information returned by the /v1/user/subscription endpoint.
-        """
-        response = _api_get("/user/subscription", self._headers)
-        subscriptionData = response.json()
-        return subscriptionData
-
-    def get_current_character_count(self) -> int:
-        """
-        Returns:
-            int: The number of characters used up.
-        """
-        subData = self.get_subscription_data()
-        return subData["character_count"]
-
-    def get_character_limit(self) -> int:
-        """
-        Returns:
-            int: The user's current character limit.
-        """
-        subData = self.get_subscription_data()
-        return subData["character_limit"]
-
-    def get_can_extend_character_limit(self) -> bool:
-        """
-        Returns:
-            bool: True if the user can (and has enabled) extend their character limit, False otherwise.
-        """
-        subData = self.get_subscription_data()
-        return subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"]
-
-    def get_voice_clone_available(self) -> bool:
-        """
-        Returns:
-            bool: True if the user can use instant voice cloning, False otherwise.
-        """
-        subData = self.get_subscription_data()
-        return subData["can_use_instant_voice_cloning"]
-
-    def get_next_invoice(self) -> dict | None:
-        """
-        Returns:
-            dict | None: The next invoice's data, or None if there is no next invoice.
-        """
-        subData = self.get_subscription_data()
-        return subData["next_invoice"]
 
     def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
         """
@@ -509,6 +511,9 @@ class ElevenLabsUser:
                 raise ValueError(f"You've already added the voice {voiceID} to your account!")
             raise e
 
+    def update_audio_quality(self):
+        self._subscriptionTier = self.get_subscription_data()["tier"]
+
     def get_real_audio_format(self, generationOptions:GenerationOptions) -> GenerationOptions:
         """
         Parameters:
@@ -517,15 +522,17 @@ class ElevenLabsUser:
         Returns:
             A GenerationOptions object with a real audio format (if the original was mp3_highest or pcm_highest, it's modified accordingly, otherwise returned directly)
         """
+        if self._subscriptionTier is None:
+            self.update_audio_quality()
+
         if "highest" in generationOptions.output_format:
-            subscriptionTier = self.get_subscription_data()["tier"]
             if "mp3" in generationOptions.output_format:
-                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("creator"):
+                if subscriptionTiers.index(self._subscriptionTier) >= subscriptionTiers.index("creator"):
                     generationOptions.output_format = "mp3_44100_192"
                 else:
                     generationOptions.output_format = "mp3_44100_128"
             else:
-                if subscriptionTiers.index(subscriptionTier) >= subscriptionTiers.index("pro"):
+                if subscriptionTiers.index(self._subscriptionTier) >= subscriptionTiers.index("pro"):
                     generationOptions.output_format = "pcm_44100"
                 else:
                     generationOptions.output_format = "pcm_24000"
