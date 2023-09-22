@@ -140,7 +140,7 @@ class GenerationOptions:
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
-    output_format:str = "mp3_highest"
+    output_format:str = "mp3_44100_128"
 
     def __post_init__(self):
         if self.model_id:
