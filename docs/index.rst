@@ -18,13 +18,15 @@ The new approach is to use the provided properties, and use voice.update_data to
 In practical terms, this:
 
 .. code-block:: python
+
     voice = user.get_voice_by_id("voiceID")
     print(voice.get_settings())
 
 
-Becomes something like:
+Becomes:
 
 .. code-block:: python
+
     voice = user.get_voice_by_id("voiceID")
     print(voice.settings)
 
@@ -32,10 +34,24 @@ Becomes something like:
 And if you want to make sure you have the latest settings:
 
 .. code-block:: python
+
     voice = user.get_voice_by_id("voiceID")
     voice.update_data()
     print(voice.settings)
 
+
+
+In almost all instances, once you've created a voice object all the associated information is immediately cached as part of its creation.
+
+This means that calling a property will never hit the API - with one exception detailed below.
+
+.. warning::
+
+    The /voices API endpoint is currently bugged, and does not return settings information.
+
+    This means that any voice object created by calling user.get_all_voices (or user.get_available_voices) will be missing settings information.
+
+    In this case, the first call to voice.settings will actually hit the API endpoint to get the required information.
 
 .. _migrate-to-0.10:
 
