@@ -122,7 +122,7 @@ class ElevenLabsVoice:
         Returns:
             dict: A dict containing all the metadata for the voice, such as the name, the description, etc.
         """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers, params={"with_settings", True})
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers, params={"with_settings": True})
 
         voiceData = response.json()
         self._name = voiceData["name"]
@@ -804,6 +804,7 @@ class _AudioStreamer:
 
 
 class _Mp3Streamer(_AudioStreamer):
+
     def __init__(self,playbackOptions:PlaybackOptions):
         super().__init__()
         self._dtype= "float32"
@@ -828,12 +829,12 @@ class _Mp3Streamer(_AudioStreamer):
 
     def _stream_downloader_function(self, streamedResponse: requests.Response):
         super()._stream_downloader_function(streamedResponse)
-        self._events["blockDataAvailable"].set()
+        self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
         return
 
     def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
         super()._stream_downloader_function_websockets(websocket, textIterator)
-        self._events["blockDataAvailable"].set()
+        self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
 
     def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
@@ -989,39 +990,53 @@ class _Mp3Streamer(_AudioStreamer):
 
     # Note: A lot of this function is just workarounds for bugs, all of which are described in this issue: https://github.com/bastibe/python-soundfile/issues/379
     # THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD RUNNING IT THE _bytesLock LOCK.
+    
+    def _assertionerror_workaround(self, dataToRead:int=-1, dtype=None, preReadFramePos=-1, preReadBytesPos=-1) -> bytes:
+        # The bug happened, so we must be at a point in the file where the reading fails.
+
+        logging.debug("The following is some logging for a new and fun soundfile bug, which I (poorly) worked around. Lovely.")
+        logging.debug(f"Before the bug: frame {preReadFramePos} (byte {preReadBytesPos})")
+        logging.debug(f"After the bug: frame {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()})")
+
+        # Release the lock on the underlying BytesIO to allow the download thread to download a bit more of the file.
+        self._bytesLock.release()
+        if not self._events["downloadDoneEvent"].is_set():
+            # Wait for the next block to be downloaded.
+            logging.debug("Fun bug happened before the download was over. Waiting for blockDataAvailable.")
+            self._events["blockDataAvailable"].clear()
+            self._events["blockDataAvailable"].wait()
+        else:
+            # Wait.
+            logging.debug("Fun bug happened AFTER the download was over. Continue.")
+
+        self._bytesLock.acquire()
+
+        # Let's seek back and re-create the SoundFile, so that we're sure it's fully synched up.
+        self._bytesFile.seek(0)
+        newSF = BodgedSoundFile(self._bytesFile, mode="r")
+        newSF.seek(preReadFramePos)
+        self._bytesSoundFile = newSF
+        logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
+
+        # Try reading the data again. If it works, good.
+        try:
+            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+        except (AssertionError, soundfile.LibsndfileError) as ea:
+            # If it fails, get the partial data from the exception args.
+            readData = ea.args[0]
+        return readData
+
     def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=None):
         if dtype is None:
             dtype = self._dtype
         preReadFramePos = self._bytesSoundFile.tell()
         preReadBytesPos = self._bytesFile.tell()
+
         try:
             readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)    #Try to read the data
         except (AssertionError, soundfile.LibsndfileError):
             #The bug happened, so we must be at a point in the file where the reading fails.
-
-            logging.debug("The following is some logging for a new and fun soundfile bug, which I (poorly) worked around. Lovely.")
-            logging.debug(f"Before the bug: frame {preReadFramePos} (byte {preReadBytesPos})")
-            logging.debug(f"After the bug: frame {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()})")
-
-            #Release the lock on the underlying BytesIO to allow the download thread to download a bit more of the file.
-            self._bytesLock.release()
-            time.sleep(0.1) #Wait.
-            self._bytesLock.acquire()
-
-            #Let's seek back and re-create the SoundFile, so that we're sure it's fully synched up.
-            self._bytesFile.seek(0)
-            newSF = BodgedSoundFile(self._bytesFile, mode="r")
-            newSF.seek(preReadFramePos)
-            self._bytesSoundFile = newSF
-            logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
-
-            #Try reading the data again. If it works, good.
-            try:
-                readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
-            except (AssertionError, soundfile.LibsndfileError) as ea:
-                #If it fails, get the partial data from the exception args.
-                readData = ea.args[0]
-
+            readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
 
 
         #This is the handling for the bug that's described in the rest of the issue. Irrelevant to this new one.
@@ -1040,11 +1055,18 @@ class _Mp3Streamer(_AudioStreamer):
                 if newSF.frames > self._bytesSoundFile.frames:
                     logging.debug("Frame counter was outdated.")
                     self._bytesSoundFile = newSF
-                    readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+
+                    preReadFramePos = self._bytesSoundFile.tell()
+                    preReadBytesPos = self._bytesFile.tell()
+
+                    try:
+                        readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
+                    except (AssertionError, soundfile.LibsndfileError):
+                        readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
                     logging.debug("Now read " + str(len(readData)) +
                           " bytes. I sure hope that number isn't zero.")
         return readData
-
+    
     def _get_data_from_download_thread(self) -> bytes:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()
