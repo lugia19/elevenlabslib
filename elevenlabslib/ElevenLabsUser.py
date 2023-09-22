@@ -44,7 +44,7 @@ class ElevenLabsUser:
         self.generation_queue = _PeekQueue()
         self._subscriptionTier = None           #Used to cache the result for mp3/pcm_highest
         try:
-            self.get_available_voices()
+            self.update_audio_quality()
         except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
             try:
                 responseJson = e.response.json()
