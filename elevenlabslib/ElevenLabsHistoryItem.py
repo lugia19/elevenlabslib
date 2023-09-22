@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import requests
 
 from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _audio_is_pcm
-
 
 class ElevenLabsHistoryItem:
     """
@@ -15,6 +16,7 @@ class ElevenLabsHistoryItem:
         There is no method to get an ElevenLabsVoice object for the voice that was used to create the file as it may not exist anymore.
         You can use the voiceID for that.
     """
+
     def __init__(self, data:dict, parentUser:ElevenLabsUser):
         """
         Initializes a new instance of the ElevenLabsHistoryItem class.
@@ -27,13 +29,14 @@ class ElevenLabsHistoryItem:
         self._historyID = data["history_item_id"]
         self._voiceId = data["voice_id"]
         self._voiceName = data["voice_name"]
+        self._voiceCategory = data["voice_category"]
+        self._model = data["model_id"]
         self._text = data["text"]
         self._dateUnix = data["date_unix"]
         self._characterCountChangeFrom = data["character_count_change_from"]
         self._characterCountChangeTo = data["character_count_change_to"]
         self._settingsUsed = data["settings"]
         self._fullMetadata = data
-        self._fullMetadata.pop("feedback")  #We don't want to expose the initial feedbackData, as that can change.
         self._audioData = None
 
     @property
@@ -55,15 +58,14 @@ class ElevenLabsHistoryItem:
 
         Warning:
             The following properties will be missing/invalid in the returned GenerationOptions due to the API not providing them:
-                - model_id will be set to "UNKNOWN"
-                - latencyOptimizationLevel will be set to -1
+                - latencyOptimizationLevel will be set to -99
         """
-        return GenerationOptions(model_id="UNKNOWN",
+        return GenerationOptions(model=self._model,
                                  stability=self._settingsUsed.get("stability"),
                                  similarity_boost=self._settingsUsed.get("similarity_boost"),
                                  style=self._settingsUsed.get("style"),
                                  use_speaker_boost=self._settingsUsed.get("use_speaker_boost"),
-                                 latencyOptimizationLevel=-1)
+                                 latencyOptimizationLevel=-99)
     @property
     def historyID(self):
         """
@@ -91,6 +93,12 @@ class ElevenLabsHistoryItem:
         The name of the voice used.
         """
         return self._voiceName
+    @property
+    def voiceCategory(self):
+        """
+        The type of voice used.
+        """
+        return self._voiceCategory
 
     @property
     def text(self):
@@ -113,6 +121,52 @@ class ElevenLabsHistoryItem:
         How many characters this generation used.
         """
         return self._characterCountChangeTo - self._characterCountChangeFrom
+
+    @property
+    def timestamp(self):
+        return datetime.utcfromtimestamp(self._dateUnix)
+
+    # Filenames are constructed as follows:
+    # Prefix: ElevenLabs_
+    # Date: 2023-09-22
+    # Time: T12_13_50 (UTC)     NOTE: There is a discrepancy. Downloading through the site puts spaces, the API puts underscores.
+    # Voice Name: Rachel Test
+    # Category: ivc/pre/pvc/gen, depending on category.
+    # Stability, SimilarityBoost, StyleExaggeration and Boost: s30_sb95_se20_b  (b is either present or not present, depending on whether boost was used.)
+    # Model indicator: e1, e2, m1, m2.
+    # Extension: always .mp3, even for PCM audio. Bug.
+
+    # Most of these are easy. The abbreviations seem like they're just hardcoded.
+    @property
+    def filename(self):
+        """
+        The filename the audio will have.
+
+        Note:
+            There is a discrepancy in the timestamp. When returned through the website, they have spaces. In the API, they have underscores.
+        """
+        dt = self.timestamp
+        date_string = dt.strftime('%Y-%m-%d')
+        time_string = dt.strftime('%H_%M_%S')
+        category_string = category_shorthands.get(self.voiceCategory)
+
+        genSettings = self.generation_settings
+        settings_string = f"s{round(genSettings.stability*100)}_sb{round(genSettings.similarity_boost*100)}"
+        if "v2" in genSettings.model_id:
+            settings_string += f"_se{round(genSettings.style*100)}{'_b' if genSettings.use_speaker_boost else ''}"
+
+        model_string = model_shorthands.get(genSettings.model_id)
+        filename = f"ElevenLabs_{date_string}T{time_string}_{self.voiceName}_{category_string}_{settings_string}_{model_string}"
+
+        #This is just here to be implemented in the future. Right now, both PCM and mp3 audio get a .mp3 extension on the API.
+        #TODO: Change this once it's fixed.
+        filename += ".mp3"
+        #if _audio_is_pcm(self._audioData):
+        #    extension = ".mp3"
+        #else:
+        #    extension = ".mp3"
+
+        return filename
 
     def get_audio_bytes(self) -> bytes:
         """

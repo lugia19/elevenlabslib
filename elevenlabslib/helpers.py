@@ -22,6 +22,19 @@ defaultHeaders = {'accept': '*/*'}
 #FYI, "pro" = "independent_publisher"
 subscriptionTiers = ["free","starter","creator","pro","growing_business","enterprise"]
 
+category_shorthands = {
+    "generated": "gen",
+    "professional": "pvc",
+    "cloned": "ivc",
+    "premade": "pre",
+}
+model_shorthands = {
+    "eleven_multilingual_v2":"m2",
+    "eleven_english_v2": "e2",
+    "eleven_multilingual_v1": "m1",
+    "eleven_monolingual_v1": "e1",
+}
+
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]
     if path[0] != "/":
@@ -155,7 +168,7 @@ class GenerationOptions:
             if var is not None and (var < 0 or var > 1):
                 raise ValueError("Please provide a value between 0 and 1 for stability, similarity_boost, and style.")
 
-        if self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4:
+        if (self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4) and self.latencyOptimizationLevel != -99:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
 
         validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "mp3_highest","pcm_highest"]

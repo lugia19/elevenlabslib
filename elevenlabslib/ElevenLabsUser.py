@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _PeekQueue
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PeekQueue, _audio_is_pcm
 
 
 class ElevenLabsUser:
@@ -327,6 +327,11 @@ class ElevenLabsUser:
 
         payload = {"history_item_ids": historyItemIDs}
         response = _api_json("/history/download", headers=self._headers, jsonData=payload)
+        historyItemsByFilename = dict()
+        for item in historyItems:
+            historyItemsByFilename[item.filename] = item
+
+
 
         if len(historyItemIDs) == 1:
             downloadedHistoryItems = {historyItemIDs[0]: response.content}
@@ -336,11 +341,11 @@ class ElevenLabsUser:
             # Extract all files and add them to the dict.
             for filePath in downloadedZip.namelist():
                 fileName = filePath[filePath.index("/")+1:]
-                historyID = fileName[fileName.rindex("_")+1:fileName.rindex(".")]
-                originalHistoryItem = historyItems[historyItemIDs.index(historyID)]
-                assert originalHistoryItem.historyID == historyID
+                audioData = downloadedZip.read(filePath)
+                assert fileName in historyItemsByFilename.keys()
+                originalHistoryItem = historyItemsByFilename[fileName]
                 if not originalHistoryItem in downloadedHistoryItems:   #Avoid re-reading duplicates from the zip file.
-                    downloadedHistoryItems[originalHistoryItem] = (downloadedZip.read(filePath), fileName)
+                    downloadedHistoryItems[originalHistoryItem] = (audioData, fileName)
 
         return downloadedHistoryItems
 
