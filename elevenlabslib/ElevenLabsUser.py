@@ -93,7 +93,7 @@ class ElevenLabsUser:
     def get_character_info(self) -> (int, int, bool):
         """
         Returns:
-            (int, int, bool): The number of characters used up, the maximum, and if the maximum can be increased.
+            (int, int, bool): A tuple containing the number of characters used up, the maximum, and if the maximum can be increased.
         """
         subData = self.get_subscription_data()
         return subData["character_count"], subData["character_limit"], (subData["can_extend_character_limit"] and subData["allowed_to_extend_character_limit"])
