@@ -98,55 +98,119 @@ class ElevenLabsVoice:
         # This is the name at the time the object was created. It won't be updated.
         # (Useful to iterate over all voices to find one with a specific name without spamming the API)
         self.initialName = voiceData["name"]
+        self._name = voiceData["name"]
+        self._description = voiceData["description"]
         self._voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
         self._sharingData = voiceData["sharing"]
+        self._settings = voiceData["settings"]
 
     def get_settings(self) -> dict:
         """
         Returns:
             dict: The current generation settings of the voice (stability and clarity).
         """
-        response = _api_get("/voices/" + self._voiceID + "/settings", self._linkedUser.headers)
-        settingsDict:dict = response.json()
+        return self.update_data()["settings"]
 
-        for key in ["stability", "similarity_boost"]:
-            if settingsDict.get(key, None) is None:
-                settingsDict[key] = 0.5
-
-        if settingsDict.get("style", None) is None:
-            settingsDict["style"] = 0.0
-
-        if settingsDict.get("use_speaker_boost", None) is None:
-            settingsDict["use_speaker_boost"] = False
-
-        return response.json()
-    def get_info(self) -> dict:
+    def update_data(self) -> dict:
         """
         Tip:
             I've only added specific getters for the most common attributes (name/description).
 
             Use this function for all other metadata.
 
+            Additionally, this also updates all the properties of the voice (name, description, etc).
+
         Returns:
             dict: A dict containing all the metadata for the voice, such as the name, the description, etc.
         """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers)
+        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers, params={"with_settings", True})
+
+        voiceData = response.json()
+        self._name = voiceData["name"]
+        self._description = voiceData["description"]
+        self._sharingData = voiceData["sharing"]
+        self._settings = voiceData["settings"]
+
         return response.json()
+
+    def get_info(self) -> dict:
+        warn("This is deprecated. voice.update_data() fulfills the same role.", DeprecationWarning)
+        return self.update_data()
+
 
     def get_name(self) -> str:
         """
+        Fetches the name from the API.
+
         Returns:
             str: The name of the voice.
         """
-        return self.get_info()["name"]
+        warn("This is deprecated, as the recommended way is to use the properties combined with update_data(). See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        return self.update_data()["name"]
 
     def get_description(self) -> str|None:
         """
+        Fetches the description from the API.
+
         Returns:
             str: The description of the voice.
         """
-        return self.get_info()["description"]
+        warn("This is deprecated, as the recommended way is to use the properties combined with update_data(). See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        return self.update_data()["description"]
+
+    @property
+    def category(self):
+        """
+        This property indicates the "type" of the voice, whether it's premade, cloned, designed etc.
+        """
+        return self._category
+
+    @property
+    def linkedUser(self):
+        """
+        Note:
+            This property can also be set.
+            This is mostly in case some future update adds shared voices (beyond the currently available premade ones).
+
+        The user currently linked to the voice, whose API key will be used to generate audio.
+
+        Returns:
+            ElevenLabsUser: The user linked to the voice.
+
+        """
+        return self._linkedUser
+
+    @linkedUser.setter
+    def linkedUser(self, newUser: ElevenLabsUser):
+        """
+        Set the user linked to the voice, whose API key will be used.
+
+        Warning:
+            Only supported for premade voices, as others do not have consistent IDs.
+
+        Args:
+            newUser (ElevenLabsUser): The new user to link to the voice.
+
+        """
+        if self.category != "premade":
+            raise ValueError("Cannot change linked user of a non-premade voice.")
+        self._linkedUser = newUser
+
+    @property
+    def voiceID(self):
+        return self._voiceID
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def settings(self):
+        if self._settings is None:  # TODO: Remove this once this no longer happens (aka, once the bug with the /voices endpoint is fixed)
+            self.update_data()
+
+        return self._settings
 
     def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, use_speaker_boost:bool=None):
         """
@@ -166,7 +230,7 @@ class ElevenLabsVoice:
         """
 
         if None in (stability, similarity_boost, style, use_speaker_boost):
-            oldSettings = self.get_settings()
+            oldSettings = self.settings
             if stability is None: stability = oldSettings["stability"]
             if similarity_boost is None: stability = oldSettings["similarity_boost"]
             if style is None: style = oldSettings["style"]
@@ -177,6 +241,7 @@ class ElevenLabsVoice:
                 raise ValueError("Please provide a value between 0 and 1.")
         payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "use_speaker_boost":use_speaker_boost}
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
+        self._settings = payload
 
     def _generate_payload(self, prompt:str, generationOptions:GenerationOptions=None):
         """
@@ -188,20 +253,24 @@ class ElevenLabsVoice:
         Returns:
             dict: A dictionary representing the payload for the API call.
         """
+        voice_settings = None
         if generationOptions is None:
             generationOptions = GenerationOptions()
-            model_id = generationOptions.model_id
-            voice_settings = None
-        else:
-            #We will assume at least ONE setting got overridden if the user is passing a generationOptions.
-            currentSettings = self.get_settings()
-            model_id = generationOptions.model_id
-            voice_settings = dict()
 
+        overriddenVoiceSettings = [generationOptions.stability, generationOptions.similarity_boost]
+        if "v2" in generationOptions.model_id:
+            overriddenVoiceSettings.append(generationOptions.style)
+            overriddenVoiceSettings.append(generationOptions.use_speaker_boost)
+
+        if None in overriddenVoiceSettings:
+            #The user overrode some voice settings, but not all of them. Let's fetch the others.
+            currentSettings = self.settings
+            voice_settings = dict()
             for key, currentValue in currentSettings.items():
                 overriddenValue = getattr(generationOptions, key, None)
                 voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
 
+        model_id = generationOptions.model_id
         payload = {"text": prompt, "model_id": model_id}
         if voice_settings is not None:
             payload["voice_settings"] = voice_settings
@@ -226,19 +295,23 @@ class ElevenLabsVoice:
         Returns:
             dict: A dictionary representing the payload for the API call.
         """
+        voice_settings = None
         if generationOptions is None:
             generationOptions = GenerationOptions()
-            model_id = generationOptions.model_id
-            voice_settings = None
-        else:
-            # We will assume at least ONE setting got overridden if the user is passing a generationOptions.
-            currentSettings = self.get_settings()
-            model_id = generationOptions.model_id
-            voice_settings = dict()
 
+        overriddenVoiceSettings = [generationOptions.stability, generationOptions.similarity_boost]
+        if "v2" in generationOptions.model_id:
+            overriddenVoiceSettings.append(generationOptions.style)
+            overriddenVoiceSettings.append(generationOptions.use_speaker_boost)
+
+        if None in overriddenVoiceSettings:
+            # The user overrode some voice settings, but not all of them. Let's fetch the others.
+            currentSettings = self.settings
+            voice_settings = dict()
             for key, currentValue in currentSettings.items():
                 overriddenValue = getattr(generationOptions, key, None)
                 voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
+
         if websocketOptions is None:
             websocketOptions = WebsocketOptions()
         BOS = {
@@ -251,7 +324,7 @@ class ElevenLabsVoice:
 
         if voice_settings is not None:
             BOS["voice_settings"] = voice_settings
-        websocketURL = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={model_id}"
+        websocketURL = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={generationOptions.model_id}"
         for key, value in self._generate_parameters(generationOptions).items():
             websocketURL += f"&{key}={value}"
         websocket = connect(
@@ -434,7 +507,7 @@ class ElevenLabsVoice:
         Returns:
             str|None: The preview URL of the voice, or None if it hasn't been generated.
         """
-        return self.get_info()["preview_url"]
+        return self.update_data()["preview_url"]
 
     def get_preview_bytes(self) -> bytes:
         """
@@ -459,47 +532,6 @@ class ElevenLabsVoice:
     def play_preview_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
         return play_audio_bytes_v2(self.get_preview_bytes(), playbackOptions)
 
-    @property
-    def category(self):
-        """
-        This property indicates the "type" of the voice, whether it's premade, cloned, designed etc.
-        """
-        return self._category
-
-    @property
-    def linkedUser(self):
-        """
-        Note:
-            This property can also be set.
-            This is mostly in case some future update adds shared voices (beyond the currently available premade ones).
-
-        The user currently linked to the voice, whose API key will be used to generate audio.
-
-        Returns:
-            ElevenLabsUser: The user linked to the voice.
-
-        """
-        return self._linkedUser
-
-    @linkedUser.setter
-    def linkedUser(self, newUser: ElevenLabsUser):
-        """
-        Set the user linked to the voice, whose API key will be used.
-
-        Warning:
-            Only supported for premade voices, as others do not have consistent IDs.
-
-        Args:
-            newUser (ElevenLabsUser): The new user to link to the voice.
-
-        """
-        if self.category != "premade":
-            raise ValueError("Cannot change linked user of a non-premade voice.")
-        self._linkedUser = newUser
-
-    @property
-    def voiceID(self):
-        return self._voiceID
 
 class ElevenLabsEditableVoice(ElevenLabsVoice):
     """
@@ -518,7 +550,7 @@ class ElevenLabsEditableVoice(ElevenLabsVoice):
             newLabels (str): The new labels
             description (str): The new description
         """
-        currentInfo = self.get_info()
+        currentInfo = self.update_data()
         payload = {
             "name": currentInfo["name"],
             "labels": currentInfo["labels"],
@@ -565,7 +597,7 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
             "enable":sharingEnabled,
             "emails":[]
         }
-        sharingInfo = self.get_info()["sharing"]
+        sharingInfo = self.update_data()["sharing"]
         if sharingInfo is not None and sharingInfo["status"] == "copied":
             raise RuntimeError("Cannot change sharing status of copied voices!")
 
@@ -589,7 +621,7 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
 
         """
         sharingEnabledString = str(sharingEnabled).lower()
-        sharingInfo = self.get_info()["sharing"]
+        sharingInfo = self.update_data()["sharing"]
         if sharingInfo is not None and sharingInfo["status"] == "copied":
             raise RuntimeError("Cannot change library sharing status of copied voices!")
 
@@ -608,7 +640,7 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
         Returns:
             The share link for the voice.
         """
-        sharingData = self.get_info()["sharing"]
+        sharingData = self.update_data()["sharing"]
         if sharingData is None or sharingData["status"] == "disabled":
             raise RuntimeError("This voice does not have sharing enabled.")
 
@@ -633,14 +665,14 @@ class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
             list[ElevenLabsSample]: The samples that make up this professional voice clone.
         """
         outputList = list()
-        samplesData = self.get_info()["samples"]
+        samplesData = self.update_data()["samples"]
         from elevenlabslib.ElevenLabsSample import ElevenLabsSample
         for sampleData in samplesData:
             outputList.append(ElevenLabsSample(sampleData, self))
         return outputList
 
     def get_high_quality_models(self) -> list[ElevenLabsModel]:
-        return [model for model in self.linkedUser.get_models() if model.modelID in self.get_info()["high_quality_base_model_ids"]]
+        return [model for model in self.linkedUser.get_models() if model.modelID in self.update_data()["high_quality_base_model_ids"]]
 
 class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
     """
@@ -656,7 +688,7 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
         """
 
         outputList = list()
-        samplesData = self.get_info()["samples"]
+        samplesData = self.update_data()["samples"]
         from elevenlabslib.ElevenLabsSample import ElevenLabsSample
         for sampleData in samplesData:
             outputList.append(ElevenLabsSample(sampleData, self))

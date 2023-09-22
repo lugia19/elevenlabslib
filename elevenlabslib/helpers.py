@@ -129,6 +129,9 @@ class GenerationOptions:
 
         Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
 
+    Warning:
+        Using pcm_highest and mp3_highest will result in an extra API to the user info endpoint _every time a generation is made_.
+        If it's used many times over, please use user.get_real_audio_format() to get the result directly, and re-use it instead.
     """
     model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
     latencyOptimizationLevel: int = 0

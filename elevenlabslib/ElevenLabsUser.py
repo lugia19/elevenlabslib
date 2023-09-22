@@ -206,7 +206,7 @@ class ElevenLabsUser:
         Returns:
             ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice|ElevenLabsProfessionalVoice: The requested voice.
         """
-        response = _api_get("/voices/" + voiceID, headers=self._headers)
+        response = _api_get("/voices/" + voiceID, headers=self._headers, params={"with_settings":True})
         voiceData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice.voiceFactory(voiceData, self)
