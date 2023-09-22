@@ -106,10 +106,8 @@ class ElevenLabsVoice:
         self._settings = voiceData["settings"]
 
     def get_settings(self) -> dict:
-        """
-        Returns:
-            dict: The current generation settings of the voice (stability and clarity).
-        """
+        warn("The new method is to use the properties combined with update_data(). See the guide at https://elevenlabslib.readthedocs.io.", DeprecationWarning)
+
         return self.update_data()["settings"]
 
     def update_data(self) -> dict:
@@ -135,28 +133,16 @@ class ElevenLabsVoice:
         return response.json()
 
     def get_info(self) -> dict:
-        warn("This is deprecated. voice.update_data() fulfills the same role.", DeprecationWarning)
+        warn("Deprecated. voice.update_data() fulfills the same role.", DeprecationWarning)
         return self.update_data()
 
 
     def get_name(self) -> str:
-        """
-        Fetches the name from the API.
-
-        Returns:
-            str: The name of the voice.
-        """
-        warn("This is deprecated, as the recommended way is to use the properties combined with update_data(). See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        warn("Deprecated. The new method is to use the properties combined with update_data(). See the guide at https://elevenlabslib.readthedocs.io.", DeprecationWarning)
         return self.update_data()["name"]
 
     def get_description(self) -> str|None:
-        """
-        Fetches the description from the API.
-
-        Returns:
-            str: The description of the voice.
-        """
-        warn("This is deprecated, as the recommended way is to use the properties combined with update_data(). See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
+        warn("Deprecated. The new method is to use the properties combined with update_data(). See the guide at https://elevenlabslib.readthedocs.io.", DeprecationWarning)
         return self.update_data()["description"]
 
     @property
@@ -732,7 +718,7 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
         if len(samples.keys()) == 0:
             raise ValueError("Please add at least one sample!")
 
-        payload = {"name":self.get_name()}
+        payload = {"name":self.update_data()["name"]}   #Has to be up to date.
         files = list()
         for fileName, fileBytes in samples.items():
             files.append(("files", (fileName, io.BytesIO(fileBytes))))

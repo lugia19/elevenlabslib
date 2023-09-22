@@ -4,6 +4,39 @@ ElevenLabsLib - Unofficial API wrapper
 .. note::
     For additional logging with this library, import logging and set the logging level to DEBUG.
 
+.. _migrate-to-0.13:
+
+Migrating from 0.12 to 0.13+
+----------------------------
+
+ElevenLabsVoice now caches most of the information on a voice, such as settings, name, description, once the instance is created.
+
+This means that methods such as voice.get_settings or voice.get_name, which hit the API every time, are deprecated.
+
+The new approach is to use the provided properties, and use voice.update_data to update all voice data if you want to ensure you have the latest data.
+
+In practical terms, this:
+
+.. code-block:: python
+    voice = user.get_voice_by_id("voiceID")
+    print(voice.get_settings())
+
+
+Becomes something like:
+
+.. code-block:: python
+    voice = user.get_voice_by_id("voiceID")
+    print(voice.settings)
+
+
+And if you want to make sure you have the latest settings:
+
+.. code-block:: python
+    voice = user.get_voice_by_id("voiceID")
+    voice.update_data()
+    print(voice.settings)
+
+
 .. _migrate-to-0.10:
 
 Migrating from 0.9 to 0.10+
