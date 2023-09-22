@@ -57,18 +57,22 @@ def main():
         # Change the voice name and description:
         newGeneratedVoice.edit_voice(newName="newName", description="This is a test voice from example.py")
 
-        # Showcase how despite the name being changed, the initialName DOES NOT.
-        print("newGeneratedVoice.get_name(): " + newGeneratedVoice.get_name())
-        print("newGeneratedVoice.initialName: " + newGeneratedVoice.initialName)
-        print("newGeneratedVoice.get_description(): " + newGeneratedVoice.get_description())
+        # Showcase how despite the name being changed, the cached one DOES NOT.
+        print("newGeneratedVoice.name: " + newGeneratedVoice.name)
+        print("newGeneratedVoice.description: " + newGeneratedVoice.description)
+
+        # If you want to get the updated ones, you have to do voice.update_data():
+        newGeneratedVoice.update_data()
+        print("newGeneratedVoice.name after update_data(): " + newGeneratedVoice.name)
+        print("newGeneratedVoice.description after update_data(): " + newGeneratedVoice.description)
         # Get the current voice settings:
-        currentSettings = newGeneratedVoice.get_settings()
+        currentSettings = newGeneratedVoice.settings
         stability: float = currentSettings["stability"]
         similarityBoost: float = currentSettings["similarity_boost"]
 
         # Show the raw voice metadata:
         print("Raw voice metadata:")
-        print(newGeneratedVoice.get_info())
+        print(newGeneratedVoice.update_data())
 
 
         # Lower stability and increase similarity, then edit the voice settings:
@@ -109,13 +113,13 @@ def main():
 
         #Get new voice data
         print("New voice:")
-        print(newClonedVoice.get_name())
+        print(newClonedVoice.name)
         print(newClonedVoice.voiceID)
         print(newClonedVoice.get_samples()[0].fileName)
 
         #Play back the automatically generated preview:
         try:
-            newClonedVoice.play_preview(playInBackground=False)
+            newClonedVoice.play_preview_v2(PlaybackOptions(runInBackground=False))
         except RuntimeError:
             print("Error getting the preview. It likely hasn't been generated yet.")
 
@@ -138,7 +142,7 @@ def main():
             if sample.fileName == firstSampleFileName:
                 print("Found the sample we want to delete.")
                 print(sample.fileName)
-                sample.play_audio(playInBackground=False)
+                sample.play_audio_v2(PlaybackOptions(runInBackground=False))
                 print("Playback done (blocking)")
 
                 firstPlaybackEnded = threading.Event()
@@ -149,8 +153,8 @@ def main():
                 #This is just a simple example of what can be done with the callbacks.
 
                 print("Doing two playbacks back to back...")
-                sample.play_audio(playInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set)
-                sample.play_audio(playInBackground=True, onPlaybackEnd=firstPlaybackEnded.set)
+                sample.play_audio_v2(PlaybackOptions(runInBackground=True, onPlaybackStart=firstPlaybackEnded.wait, onPlaybackEnd=secondPlaybackEnded.set))
+                sample.play_audio_v2(PlaybackOptions(runInBackground=True, onPlaybackEnd=firstPlaybackEnded.set))
                 print("Waiting for both playbacks to end...")
                 secondPlaybackEnded.wait()
                 sample.delete()

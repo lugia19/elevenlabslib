@@ -232,7 +232,7 @@ except IndexError:
         firstSample = r"X:\sample1.mp3"
         newClonedVoice = user.clone_voice_by_path(newVoiceName, firstSample)
         print("New voice:")
-        print(newClonedVoice.get_name())
+        print(newClonedVoice.name)
         
         #Add a sample by loading it as bytes.
         secondSample = open(r"X:\sample2.mp3", "rb").read()

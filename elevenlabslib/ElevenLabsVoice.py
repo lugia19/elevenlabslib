@@ -192,6 +192,10 @@ class ElevenLabsVoice:
         return self._name
 
     @property
+    def description(self):
+        return self._description
+
+    @property
     def settings(self):
         if self._settings is None:  # TODO: Remove this once this no longer happens (aka, once the bug with the /voices endpoint is fixed)
             self.update_data()
