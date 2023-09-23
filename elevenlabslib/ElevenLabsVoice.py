@@ -990,7 +990,6 @@ class _Mp3Streamer(_AudioStreamer):
 
     # Note: A lot of this function is just workarounds for bugs, all of which are described in this issue: https://github.com/bastibe/python-soundfile/issues/379
     # THIS FUNCTION ASSUMES YOU'VE GIVEN THE THREAD RUNNING IT THE _bytesLock LOCK.
-    
     def _assertionerror_workaround(self, dataToRead:int=-1, dtype=None, preReadFramePos=-1, preReadBytesPos=-1) -> bytes:
         # The bug happened, so we must be at a point in the file where the reading fails.
 
@@ -1066,7 +1065,7 @@ class _Mp3Streamer(_AudioStreamer):
                     logging.debug("Now read " + str(len(readData)) +
                           " bytes. I sure hope that number isn't zero.")
         return readData
-    
+
     def _get_data_from_download_thread(self) -> bytes:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()

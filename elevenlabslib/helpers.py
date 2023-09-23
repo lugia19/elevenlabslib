@@ -443,7 +443,6 @@ class _PeekQueue(queue.Queue):
         with self.mutex:
             return list(self.queue)
 
-
 def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:_PeekQueue) -> requests.Response:
     #Just a helper function which does all the concurrency stuff for TTS calls.
     waitMultiplier = 1
@@ -451,6 +450,7 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
         response = requestFunction()
         response.raise_for_status() #Just in case the callable isn't a function that already does this.
     except requests.exceptions.RequestException as e:
+        print(e.response.json())
         if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
             logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
             # Insert this in the user's "waiting to be generated" queue.
