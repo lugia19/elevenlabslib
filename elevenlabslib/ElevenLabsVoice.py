@@ -493,6 +493,48 @@ class ElevenLabsVoice:
         else:
             return "no_history_id_available", audioStreamFuture
 
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str]], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> queue.Queue:
+        """
+        Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
+
+        If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
+
+        Parameters:
+            prompt (str|Iterator[str]): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming).
+            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
+            websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
+
+        Returns:
+            The queue which will have the audio data put in it, with None acting as an indicator for when it's done.
+        """
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+
+        audioQueue = queue.Queue()
+
+        #We need the real sample rate.
+        generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
+
+        if isinstance(prompt, str):
+            payload = self._generate_payload(prompt, generationOptions)
+            path = "/text-to-speech/" + self._voiceID + "/stream"
+            #Not using input streaming
+            params = self._generate_parameters(generationOptions)
+            requestFunction = lambda: requests.post(apiEndpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
+                                                    params = params, timeout=requests_timeout)
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        else:
+            if websocketOptions is None:
+                websocketOptions = WebsocketOptions()
+            responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+
+        streamer = _DownloadStreamer(audioQueue)
+        mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, prompt))
+        mainThread.start()
+
+        return audioQueue
+
     def get_preview_url(self) -> str|None:
         """
         Returns:
@@ -802,6 +844,31 @@ class _AudioStreamer:
 
     def _stream_downloader_chunk_handler(self, chunk):
         pass
+
+class _DownloadStreamer(_AudioStreamer):
+    def __init__(self, audioQueue:queue.Queue):
+        super().__init__()
+        self._events: dict[str, threading.Event] = {
+            "downloadDoneEvent": threading.Event()
+        }
+        self.destination_queue = audioQueue
+
+    def begin_streaming(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection], text: Union[str, Iterator[str]] = None):
+        for eventName, event in self._events.items():
+            event.clear()
+
+        logging.debug("Starting playback...")
+        if isinstance(streamConnection, requests.Response):
+            self._stream_downloader_function(streamConnection)
+        else:
+            self._stream_downloader_function_websockets(streamConnection, text)
+        logging.debug("Stream done - putting None in the queue.")
+        self.destination_queue.put(None)
+        return
+
+    def _stream_downloader_chunk_handler(self, chunk):
+        self.destination_queue.put(chunk)
+
 
 
 class _Mp3Streamer(_AudioStreamer):
