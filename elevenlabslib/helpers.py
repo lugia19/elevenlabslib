@@ -21,7 +21,7 @@ apiEndpoint = "https://api.elevenlabs.io/v1"
 defaultHeaders = {'accept': '*/*'}
 #FYI, "pro" = "independent_publisher"
 subscriptionTiers = ["free","starter","creator","pro","growing_business","enterprise"]
-requests_timeout = 120
+requests_timeout = 900
 
 category_shorthands = {
     "generated": "gen",
@@ -472,7 +472,7 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
                     break
                 else:
                     logging.debug(f"\nCurrent first is {peeked}, we are {generationID}\n")
-                    logging.debug(f"\nOther items are first in queue, waiting for 0.3s\n")
+                    logging.debug(f"\nOther items are first in queue, waiting for 0.5s\n")
                     time.sleep(0.5)  # The time to peek at the queue is constant.
             except requests.exceptions.RequestException as e:
                 if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
