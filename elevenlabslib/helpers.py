@@ -21,6 +21,7 @@ apiEndpoint = "https://api.elevenlabs.io/v1"
 defaultHeaders = {'accept': '*/*'}
 #FYI, "pro" = "independent_publisher"
 subscriptionTiers = ["free","starter","creator","pro","growing_business","enterprise"]
+requests_timeout = 120
 
 category_shorthands = {
     "generated": "gen",
@@ -40,6 +41,7 @@ def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     if path[0] != "/":
         path = "/"+path
     argsDict["url"] = apiEndpoint + path
+    argsDict["timeout"] = requests_timeout
     argsDict.pop("path")
 
     response:requests.Response = requestMethod(**argsDict)

@@ -330,7 +330,7 @@ class ElevenLabsVoice:
 
         return self.generate_to_historyID_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
 
-    def generate_to_historyID_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> str:
+    def generate_to_historyID_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> (str, requests.Response):
         """
         Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
 
@@ -339,6 +339,7 @@ class ElevenLabsVoice:
             generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
         Returns:
             The ID for the new HistoryItem
+            The full response object
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
@@ -350,7 +351,7 @@ class ElevenLabsVoice:
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
         response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
-        return response.headers["history-item-id"]
+        return response.headers["history-item-id"], response
 
     def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
         warn("This function is deprecated. Please use generate_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
@@ -469,7 +470,7 @@ class ElevenLabsVoice:
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
             requestFunction = lambda: requests.post(apiEndpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
-                                                    params = params)
+                                                    params = params, timeout=requests_timeout)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         else:
@@ -511,7 +512,7 @@ class ElevenLabsVoice:
         previewURL = self.get_preview_url()
         if previewURL is None:
             raise RuntimeError("No preview URL available!")
-        response = requests.get(previewURL, allow_redirects=True)
+        response = requests.get(previewURL, allow_redirects=True, timeout=requests_timeout)
         return response.content
 
     def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
