@@ -134,6 +134,7 @@ class GenerationOptions:
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
         output_format (str, optional): Output format for the audio. mp3_highest and pcm_highest will automatically use the highest quality of that format you have available.
+        forced_pronunciations (dict, optional): A dict specifying custom pronunciations for words. The key is the word, with the 'alphabet' and 'pronunciation' values required.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
@@ -155,6 +156,7 @@ class GenerationOptions:
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
     output_format:str = "mp3_highest"
+    forced_pronunciations:Optional[dict] = None
 
     def __post_init__(self):
         if self.model_id:
@@ -166,6 +168,14 @@ class GenerationOptions:
                 self.model_id = self.model.modelID
 
         #Validate values
+        if self.forced_pronunciations:
+            valid_alphabets =  ["ipa","cmu-arpabet"]
+            for key, value in self.forced_pronunciations.items():
+                if not isinstance(value, dict) or "alphabet" not in value or "pronunciation" not in value:
+                    raise ValueError(f"Please ensure that each value in custom_pronunciations is a dict containing 'alphabet' and 'pronunciation' values (Error raised due to {key}).")
+                value["alphabet"] = value["alphabet"].lower()
+                if value["alphabet"] not in valid_alphabets:
+                    raise ValueError(f"Please specify a valid alphabet for {key}. Valid values are: {valid_alphabets}")
         for var in [self.stability, self.similarity_boost, self.style]:
             if var is not None and (var < 0 or var > 1):
                 raise ValueError("Please provide a value between 0 and 1 for stability, similarity_boost, and style.")
@@ -177,6 +187,18 @@ class GenerationOptions:
 
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")
+
+def apply_pronunciations(text:str, generation_options:GenerationOptions) -> str:
+    supported_models = ["eleven_monolingual_v1"]
+    if generation_options.model_id not in supported_models:
+        return text
+
+    if generation_options.forced_pronunciations:
+        for word, value in generation_options.forced_pronunciations.items():
+            constructed_string = f'<phoneme alphabet="{value["alphabet"]}" ph="{value["pronunciation"]}">{word}</phoneme>'
+            text = text.replace(word, constructed_string)
+
+    return text
 
 @dataclasses.dataclass
 class WebsocketOptions:
@@ -485,19 +507,20 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
     return response
 
 #Taken from the official python library - https://github.com/elevenlabs/elevenlabs-python
-def _text_chunker(chunks: Iterator[str]) -> Iterator[str]:
+def _text_chunker(chunks: Iterator[str], generation_options:GenerationOptions) -> Iterator[str]:
     """Used during input streaming to chunk text blocks and set last char to space"""
     splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
     buffer = ""
+
     for text in chunks:
         if buffer.endswith(splitters):
-            yield buffer if buffer.endswith(" ") else buffer + " "
+            yield apply_pronunciations(buffer, generation_options) if buffer.endswith(" ") else apply_pronunciations(buffer + " ", generation_options)
             buffer = text
         elif text.startswith(splitters):
             output = buffer + text[0]
-            yield output if output.endswith(" ") else output + " "
+            yield apply_pronunciations(output, generation_options) if output.endswith(" ") else apply_pronunciations(output + " ", generation_options)
             buffer = text[1:]
         else:
             buffer += text
     if buffer != "":
-        yield buffer + " "
+        yield apply_pronunciations(buffer + " ", generation_options)

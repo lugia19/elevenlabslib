@@ -261,7 +261,7 @@ class ElevenLabsVoice:
                 voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
 
         model_id = generationOptions.model_id
-        payload = {"text": prompt, "model_id": model_id}
+        payload = {"text": apply_pronunciations(prompt, generationOptions), "model_id": model_id}
         if voice_settings is not None:
             payload["voice_settings"] = voice_settings
 
@@ -476,6 +476,7 @@ class ElevenLabsVoice:
             if websocketOptions is None:
                 websocketOptions = WebsocketOptions()
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+        streamer:Union[_Mp3Streamer, _PCMStreamer]
         if "mp3" in generationOptions.output_format:
             streamer = _Mp3Streamer(playbackOptions)
         else:
@@ -483,10 +484,10 @@ class ElevenLabsVoice:
         audioStreamFuture = concurrent.futures.Future()
 
         if playbackOptions.runInBackground:
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, audioStreamFuture, prompt))
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, audioStreamFuture, generationOptions, prompt))
             mainThread.start()
         else:
-            streamer.begin_streaming(responseConnection, audioStreamFuture, prompt)
+            streamer.begin_streaming(responseConnection, audioStreamFuture, generationOptions, prompt)
         if isinstance(responseConnection, requests.Response):
             return responseConnection.headers["history-item-id"], audioStreamFuture
         else:
@@ -528,8 +529,8 @@ class ElevenLabsVoice:
                 websocketOptions = WebsocketOptions()
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
 
-        streamer = _DownloadStreamer(audioQueue)
-        mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, prompt))
+        streamer:_DownloadStreamer = _DownloadStreamer(audioQueue)
+        mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, generationOptions, prompt))
         mainThread.start()
 
         return audioQueue
@@ -803,11 +804,11 @@ class _AudioStreamer:
         self._events["downloadDoneEvent"].set()
         return
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
+    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions):
         totalLength = 0
         logging.debug("Starting iter...")
 
-        for text_chunk in _text_chunker(textIterator):
+        for text_chunk in _text_chunker(text_iterator, generation_options):
             data = dict(text=text_chunk, try_trigger_generation=True)
             try:
                 websocket.send(json.dumps(data))
@@ -852,7 +853,7 @@ class _DownloadStreamer(_AudioStreamer):
         }
         self.destination_queue = audioQueue
 
-    def begin_streaming(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection], text: Union[str, Iterator[str]] = None):
+    def begin_streaming(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection], generation_options:GenerationOptions, text: Union[str, Iterator[str]] = None):
         for eventName, event in self._events.items():
             event.clear()
 
@@ -860,7 +861,7 @@ class _DownloadStreamer(_AudioStreamer):
         if isinstance(streamConnection, requests.Response):
             self._stream_downloader_function(streamConnection)
         else:
-            self._stream_downloader_function_websockets(streamConnection, text)
+            self._stream_downloader_function_websockets(streamConnection, text, generation_options)
         logging.debug("Stream done - putting None in the queue.")
         self.destination_queue.put(None)
         return
@@ -899,13 +900,13 @@ class _Mp3Streamer(_AudioStreamer):
         self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
         return
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
-        super()._stream_downloader_function_websockets(websocket, textIterator)
+    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions):
+        super()._stream_downloader_function_websockets(websocket, text_iterator, generation_options)
         self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
 
-    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
+    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, generation_options:GenerationOptions, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
-        # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
+        # Note: text and custom_pronunciations are unused if it's not doing input_streaming - I just pass them anyway out of convenience.
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
@@ -915,7 +916,7 @@ class _Mp3Streamer(_AudioStreamer):
         if isinstance(streamConnection, requests.Response):
             downloadThread = threading.Thread(target=self._stream_downloader_function, args=(streamConnection,))
         else:
-            downloadThread = threading.Thread(target=self._stream_downloader_function_websockets, args=(streamConnection, text))
+            downloadThread = threading.Thread(target=self._stream_downloader_function_websockets, args=(streamConnection, text, generation_options))
         downloadThread.start()
 
         while True:
@@ -1176,11 +1177,11 @@ class _PCMStreamer(_AudioStreamer):
         super()._stream_downloader_function(streamedResponse)
         self._stream_downloader_chunk_handler(b"")
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, textIterator: Iterator[str]):
-        super()._stream_downloader_function_websockets(websocket, textIterator)
+    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions):
+        super()._stream_downloader_function_websockets(websocket, text_iterator, generation_options)
         self._stream_downloader_chunk_handler(b"")
 
-    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, text:Union[str,Iterator[str]]=None):
+    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, generation_options:GenerationOptions, text:Union[str,Iterator[str]]=None):
         # Clean all the buffers and reset all events.
         # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
         self._q = queue.Queue()
@@ -1198,7 +1199,7 @@ class _PCMStreamer(_AudioStreamer):
             if isinstance(streamConnection, requests.Response):
                 self._stream_downloader_function(streamConnection)
             else:
-                self._stream_downloader_function_websockets(streamConnection, text)
+                self._stream_downloader_function_websockets(streamConnection, text, generation_options)
 
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
