@@ -26,6 +26,26 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 historyItem.delete()
 ```
 
+## Force the pronunciation of a word
+```python
+from elevenlabslib import *
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+#This means 'test' will be pronounced as 'tomato'.
+forced_pronunciations = {
+    "test":
+        {
+            "alphabet":"ipa",
+            "pronunciation":"təˈmeɪtoʊ"
+        }
+}
+
+voice.generate_stream_audio_v2("This is a test. Both instances of test will be pronounced as tomato.", playbackOptions=PlaybackOptions(runInBackground=False), generationOptions=GenerationOptions(model="eleven_monolingual_v1",forced_pronunciations=forced_pronunciations))
+
+```
+
 ## Generate audio in PCM format
 ```python
 from elevenlabslib import *
@@ -168,25 +188,6 @@ audioBytes = open(filePath, "rb").read()
 
 responseDict = run_ai_speech_classifier(audioBytes)
 print(f"There's a {responseDict['probability'] * 100}% chance that this audio was AI generated.")
-```
-
-## Rate a generated audio
-
-```python
-from elevenlabslib import *
-
-api_key = "api_key"
-user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
-
-#Generate an audio (without playing it)
-generationData = premadeVoice.generate_audio_v2("Test.")
-
-#Fetch the corresponding historyItem
-historyItem = user.get_history_item(generationData[1])
-
-#Rate it (note: there are restrictions on what can be rated and how)
-historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech service works very well!")
 ```
 
 ## Use the multilingual TTS model
