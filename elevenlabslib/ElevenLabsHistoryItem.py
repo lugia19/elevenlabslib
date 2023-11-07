@@ -6,7 +6,7 @@ import requests
 
 from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _audio_is_pcm
+from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _audio_is_raw
 
 class ElevenLabsHistoryItem:
     """
@@ -206,9 +206,12 @@ class ElevenLabsHistoryItem:
 
         Error:
             Due to the lack of samplerate information, when playing back a generation created with PCM, the library assumes it was made using the highest samplerate available to your account.
+            Additionally, we're assuming the file is using PCM rather than ULAW.
+
+            If either of the above assumptions isn't true, simply use the audio functions in helpers.py to play back the audio yourself.
         """
         audioBytes = self.get_audio_bytes()
-        if _audio_is_pcm(audioBytes):
+        if _audio_is_raw(audioBytes):
             sampleRate = int(self._parentUser.get_real_audio_format(GenerationOptions(output_format="pcm_highest")).output_format.lower().replace("pcm_",""))
             audioBytes = pcm_to_wav(audioBytes, sampleRate)
 

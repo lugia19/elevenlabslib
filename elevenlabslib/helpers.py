@@ -34,6 +34,7 @@ model_shorthands = {
     "eleven_english_v2": "e2",
     "eleven_multilingual_v1": "m1",
     "eleven_monolingual_v1": "e1",
+    "eleven_turbo_v2": "t2"
 }
 
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
@@ -183,7 +184,7 @@ class GenerationOptions:
         if (self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4) and self.latencyOptimizationLevel != -99:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
 
-        validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "mp3_highest","pcm_highest"]
+        validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "mp3_highest","pcm_highest", "ulaw_8000"]
 
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")
@@ -362,7 +363,7 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.
         return playbackWrapper.stream
 
 
-def _audio_is_pcm(audioData:bytes):
+def _audio_is_raw(audioData:bytes):
     #Checks whether the provided audio file is PCM or some other format.
     try:
         soundfile.SoundFile(io.BytesIO(audioData))
@@ -370,9 +371,34 @@ def _audio_is_pcm(audioData:bytes):
     except soundfile.LibsndfileError:
         return True
 
+def raw_to_wav(rawData:bytes, samplerate:int, subtype:str) -> bytes:
+    # Let's make sure the user didn't just forward a tuple from one of the other functions...
+    if isinstance(rawData, tuple):
+        for item in rawData:
+            if isinstance(item, bytes):
+                rawData = item
+
+    soundFile = sf.SoundFile(io.BytesIO(rawData), format="RAW", subtype=subtype, channels=1, samplerate=samplerate)
+    wavIO = io.BytesIO()
+    sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
+
+    return wavIO.getvalue()
+def ulaw_to_wav(ulawData:bytes, samplerate:int) -> bytes:
+    """
+    This function converts ULAW audio to a WAV.
+
+    Parameters:
+        ulawData (bytes): The ULAW audio data.
+        samplerate (int): The sample rate of the audio
+
+    Returns:
+        The bytes of the wav file.
+    """
+    return raw_to_wav(ulawData, samplerate, "ULAW")
+
 def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
     """
-    This function converts raw PCM audio to a WAV.
+    This function converts PCM audio to a WAV.
 
     Parameters:
         pcmData (bytes): The PCM audio data.
@@ -382,17 +408,7 @@ def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
         The bytes of the wav file.
     """
 
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(pcmData, tuple):
-        for item in pcmData:
-            if isinstance(item, bytes):
-                pcmData = item
-
-    soundFile = sf.SoundFile(io.BytesIO(pcmData), format="RAW", subtype="PCM_16", channels=1, samplerate=samplerate)
-    wavIO = io.BytesIO()
-    sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
-
-    return wavIO.getvalue()
+    return raw_to_wav(pcmData, samplerate, "PCM_16")
 
 def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
     """

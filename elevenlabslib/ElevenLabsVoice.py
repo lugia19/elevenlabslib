@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import audioop
 import base64
 import concurrent.futures
 import datetime
@@ -13,6 +14,7 @@ from typing import Optional, Tuple, Any, Iterator
 from warnings import warn
 
 import numpy
+import numpy as np
 import requests
 import soundfile as sf
 import sounddevice as sd
@@ -388,7 +390,9 @@ class ElevenLabsVoice:
         audioData = response.content
 
         if "pcm" in generationOptions.output_format:
-            audioData = pcm_to_wav(audioData, int(generationOptions.output_format.lower().replace("pcm_","")))
+            audioData = pcm_to_wav(audioData, int(generationOptions.output_format.lower().replace("pcm_", "")))
+        if "ulaw" in generationOptions.output_format:
+            audioData = ulaw_to_wav(audioData, int(generationOptions.output_format.lower().replace("ulaw_", "")))
 
         return audioData, response.headers["history-item-id"]
 
@@ -476,11 +480,15 @@ class ElevenLabsVoice:
             if websocketOptions is None:
                 websocketOptions = WebsocketOptions()
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
-        streamer:Union[_Mp3Streamer, _PCMStreamer]
+        streamer:Union[_Mp3Streamer, _RAWStreamer]
         if "mp3" in generationOptions.output_format:
             streamer = _Mp3Streamer(playbackOptions)
         else:
-            streamer = _PCMStreamer(playbackOptions, int(generationOptions.output_format.lower().replace("pcm_", "")))
+            parts = generationOptions.output_format.lower().split("_")
+            subtype = parts[0]
+            samplerate = int(parts[1])
+            streamer = _RAWStreamer(playbackOptions, subtype, samplerate)
+
         audioStreamFuture = concurrent.futures.Future()
 
         if playbackOptions.runInBackground:
@@ -1155,13 +1163,14 @@ class _Mp3Streamer(_AudioStreamer):
         self._bytesLock.release()
         return readData
 
-class _PCMStreamer(_AudioStreamer):
-    def __init__(self,playbackOptions:PlaybackOptions, samplerate:int):
+class _RAWStreamer(_AudioStreamer):
+    def __init__(self,playbackOptions:PlaybackOptions, subtype:str, samplerate:int):
         super().__init__()
         self._q = queue.Queue()
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
         self._dtype = "int16"
+        self._subtype = subtype
         self._samplerate = samplerate
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
         self._channels = 1
@@ -1209,7 +1218,12 @@ class _PCMStreamer(_AudioStreamer):
 
     def _stream_downloader_chunk_handler(self, chunk:bytes):
         #Split the code for easier handling
-        self._buffer += chunk
+
+        if self._subtype.lower() == "ulaw":
+            self._buffer += audioop.ulaw2lin(chunk, 2)
+        else:
+            self._buffer += chunk
+
         while len(self._buffer) >= _playbackBlockSize*2:    #*2 due to the audio frame size
             frame_data, self._buffer = self._buffer[:_playbackBlockSize*2], self._buffer[_playbackBlockSize*2:]
             audioData = numpy.frombuffer(frame_data, dtype=self._dtype)
