@@ -1230,9 +1230,13 @@ class _RAWStreamer(_AudioStreamer):
             self._q.put(audioData.reshape(-1, self._channels))
 
         if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
-            logging.debug("Download is done, dump the remaining audio in the queue.")
             audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
             self._q.put(audioData.reshape(-1, self._channels))
+
+            # Pad the end of the audio with silence to avoid the looping final chunk.s
+            silence_chunk = np.zeros(_playbackBlockSize * self._channels, dtype=self._dtype).reshape(-1, self._channels)
+            for _ in range(2):
+                self._q.put(silence_chunk)
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
         assert frames == _playbackBlockSize
