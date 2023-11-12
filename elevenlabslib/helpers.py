@@ -190,7 +190,7 @@ class GenerationOptions:
             raise ValueError("Selected output format is not valid.")
 
 def apply_pronunciations(text:str, generation_options:GenerationOptions) -> str:
-    supported_models = ["eleven_monolingual_v1"]
+    supported_models = ["eleven_monolingual_v1", "eleven_turbo_v2"]
     if generation_options.model_id not in supported_models:
         return text
 
