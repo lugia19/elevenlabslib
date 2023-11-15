@@ -4,6 +4,7 @@ import audioop
 import base64
 import concurrent.futures
 import datetime
+import logging
 import os
 import queue
 
@@ -891,7 +892,7 @@ class _Mp3Streamer(_AudioStreamer):
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
         self._frameSize = 0
-
+        self.last_recreated_pos = 0 #Handling for a bug.
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
 
         self._events: dict[str, threading.Event] = {
@@ -954,7 +955,13 @@ class _Mp3Streamer(_AudioStreamer):
         logging.debug("Starting playback...")
         with stream:
             while True:
-                data = self._get_data_from_download_thread()
+                try:
+                    data = self._get_data_from_download_thread()
+                except RuntimeError as e:
+                    logging.debug("File was looping at the end. Exiting.")
+                    self._q.put(e)
+                    break
+
                 if len(data) == _playbackBlockSize*self._frameSize:
                     logging.debug("Putting " + str(len(data)) + " bytes in queue.")
                     self._q.put(data)
@@ -1022,9 +1029,15 @@ class _Mp3Streamer(_AudioStreamer):
                     readData = self._q.get_nowait()
                 else:
                     readData = self._q.get(timeout=5)    #Download isn't over so we may have to wait.
+
+                if isinstance(readData, RuntimeError):
+                    logging.warning("File was looping. Stopping.")
+                    raise sd.CallbackStop
+
                 if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
-                    logging.error("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
+                    logging.warning("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
                     continue
+
                 break
             except queue.Empty as e:
                 if self._events["downloadDoneEvent"].is_set():
@@ -1057,7 +1070,7 @@ class _Mp3Streamer(_AudioStreamer):
                     logging.debug("EOF reached and download over! Stopping callback...")
                     raise sd.CallbackStop
                 else:
-                    logging.critical("...Read no data but the download isn't over? Panic. Just send silence.")
+                    logging.error("...Read no data but the download isn't over? Panic. Just send silence.")
                     outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
         else:
             outdata[:] = readData
@@ -1084,15 +1097,22 @@ class _Mp3Streamer(_AudioStreamer):
             # Wait.
             logging.debug("Fun bug happened AFTER the download was over. Continue.")
 
+
         self._bytesLock.acquire()
 
         # Let's seek back and re-create the SoundFile, so that we're sure it's fully synched up.
         self._bytesFile.seek(0)
         newSF = BodgedSoundFile(self._bytesFile, mode="r")
         newSF.seek(preReadFramePos)
+        del self._bytesSoundFile
         self._bytesSoundFile = newSF
+        new_bytes_pos = self._bytesFile.tell()
         logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
-
+        if self.last_recreated_pos == new_bytes_pos and self._events["downloadDoneEvent"].is_set():
+            #If the bug happens twice, at the same spot, once hte file is fully downloaded, just assume it's broken.
+            raise RuntimeError("File is looping at the end.")
+        else:
+            self.last_recreated_pos = new_bytes_pos
         # Try reading the data again. If it works, good.
         try:
             readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
@@ -1129,6 +1149,7 @@ class _Mp3Streamer(_AudioStreamer):
                 newSF.seek(self._bytesSoundFile.tell() - int(len(readData) / self._frameSize))
                 if newSF.frames > self._bytesSoundFile.frames:
                     logging.debug("Frame counter was outdated.")
+                    del self._bytesSoundFile
                     self._bytesSoundFile = newSF
 
                     preReadFramePos = self._bytesSoundFile.tell()
@@ -1140,6 +1161,8 @@ class _Mp3Streamer(_AudioStreamer):
                         readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
                     logging.debug("Now read " + str(len(readData)) +
                           " bytes. I sure hope that number isn't zero.")
+                else:
+                    del newSF
         return readData
 
     def _get_data_from_download_thread(self) -> bytes:
@@ -1251,6 +1274,7 @@ class _RAWStreamer(_AudioStreamer):
                 if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
                     logging.error("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
                     continue
+
                 break
             except queue.Empty as e:
                 if self._events["downloadDoneEvent"].is_set():
