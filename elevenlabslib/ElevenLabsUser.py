@@ -38,7 +38,7 @@ class ElevenLabsUser:
         """
         self._xi_api_key = xi_api_key
         self._headers = dict()
-        for key, value in defaultHeaders.items():
+        for key, value in default_headers.items():
             self._headers[key] = value
         self._headers["xi-api-key"] = self.xi_api_key
         self.generation_queue = _PeekQueue()
@@ -532,12 +532,12 @@ class ElevenLabsUser:
 
         if "highest" in generationOptions.output_format:
             if "mp3" in generationOptions.output_format:
-                if subscriptionTiers.index(self._subscriptionTier) >= subscriptionTiers.index("creator"):
+                if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("creator"):
                     generationOptions.output_format = "mp3_44100_192"
                 else:
                     generationOptions.output_format = "mp3_44100_128"
             else:
-                if subscriptionTiers.index(self._subscriptionTier) >= subscriptionTiers.index("pro"):
+                if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("pro"):
                     generationOptions.output_format = "pcm_44100"
                 else:
                     generationOptions.output_format = "pcm_24000"

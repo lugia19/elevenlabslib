@@ -26,6 +26,24 @@ historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech servic
 historyItem.delete()
 ```
 
+## Speech to speech
+```python
+from elevenlabslib import *
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+#Note: As of right now, overriding parameters in a request (such as stability) does not work for s2s.
+generation_options = GenerationOptions(model_id="eleven_english_sts_v2")
+
+source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
+#sorce_audio can also be bytes, to allow you to pass input from a microphone:
+source_audio_bytes = source_audio_file.read()
+
+voice.generate_stream_audio_v2(source_audio_file, generationOptions=generation_options)
+voice.generate_stream_audio_v2(source_audio_bytes, generationOptions=generation_options)
+```
+
 ## Force the pronunciation of a word
 ```python
 from elevenlabslib import *

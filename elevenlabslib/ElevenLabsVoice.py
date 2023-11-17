@@ -3,34 +3,18 @@ from __future__ import annotations
 import audioop
 import base64
 import concurrent.futures
-import datetime
-import logging
-import os
-import queue
-
-import threading
-import time
 from concurrent.futures import Future
-from typing import Optional, Tuple, Any, Iterator
-from warnings import warn
+from typing import Iterator
+from typing import TYPE_CHECKING
 
 import numpy
 import numpy as np
-import requests
-import soundfile as sf
-import sounddevice as sd
-
-from typing import TYPE_CHECKING
-
 import websockets
 from websockets.sync.client import connect
-
-from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
 if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsSample import ElevenLabsSample
     from elevenlabslib.ElevenLabsUser import ElevenLabsUser
-    from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
 
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
@@ -236,17 +220,16 @@ class ElevenLabsVoice:
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
         self._settings = payload
 
-    def _generate_payload(self, prompt:str, generationOptions:GenerationOptions=None):
+    def _generate_payload(self, prompt:Union[str, bytes, BinaryIO], generationOptions:GenerationOptions=None):
         """
         Generates the payload for the text-to-speech API call.
 
         Args:
-            prompt (str): The prompt to generate speech for.
+            prompt (str|bytes): The prompt or audio to generate speech for.
             generationOptions (GenerationOptions): The options for this generation.
         Returns:
             dict: A dictionary representing the payload for the API call.
         """
-        voice_settings = None
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
@@ -255,8 +238,14 @@ class ElevenLabsVoice:
             overriddenVoiceSettings.append(generationOptions.style)
             overriddenVoiceSettings.append(generationOptions.use_speaker_boost)
 
-        if None in overriddenVoiceSettings:
-            #The user overrode some voice settings, but not all of them. Let's fetch the others.
+        include_settings = False
+        voice_settings = None
+        for value in overriddenVoiceSettings:
+            if value is not None:
+                include_settings = True
+                break
+
+        if include_settings:
             currentSettings = self.settings
             voice_settings = dict()
             for key, currentValue in currentSettings.items():
@@ -264,7 +253,15 @@ class ElevenLabsVoice:
                 voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
 
         model_id = generationOptions.model_id
-        payload = {"text": apply_pronunciations(prompt, generationOptions), "model_id": model_id}
+
+        if isinstance(prompt, str):
+            payload = {
+                "model_id": model_id,
+                "text": apply_pronunciations(prompt, generationOptions)
+            }
+        else:
+            payload = {"model_id": model_id}
+
         if voice_settings is not None:
             payload["voice_settings"] = voice_settings
 
@@ -333,12 +330,12 @@ class ElevenLabsVoice:
 
         return self.generate_to_historyID_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
 
-    def generate_to_historyID_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> str:
+    def generate_to_historyID_v2(self, prompt: Union[str,bytes,BinaryIO], generationOptions:GenerationOptions=None) -> str:
         """
         Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
 
         Parameters:
-            prompt (str): The text prompt to generate audio from.
+            prompt (str, bytes, BinaryIO): The text prompt or audio bytes/file pointer to generate audio from.
             generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
         Returns:
             The ID for the new HistoryItem
@@ -349,26 +346,41 @@ class ElevenLabsVoice:
         payload = self._generate_payload(prompt, generationOptions)
         params = self._generate_parameters(generationOptions)
 
-        requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
+        if not isinstance(prompt, str):
+            if "output_format" in params:
+                params.pop("output_format")
+            source_audio, prompt = io_hash_from_audio(prompt)
+
+            files = {"audio": source_audio}
+
+            requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, data=payload, params=params, filesData=files)
+        else:
+            requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
+
+
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
         response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
 
-        return response.headers["history-item-id"]
+        if "history-item-id" in response.headers:
+            history_id = response.headers["history-item-id"]
+        else:
+            history_id = "no_history_id_available"
+        return history_id
 
     def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
         warn("This function is deprecated. Please use generate_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
 
         return self.generate_audio_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
 
-    def generate_audio_v2(self, prompt: str, generationOptions:GenerationOptions=None) -> tuple[bytes,str]:
+    def generate_audio_v2(self, prompt: Union[str,bytes, BinaryIO], generationOptions:GenerationOptions=None) -> tuple[bytes,str]:
         """
-        Generates speech for the given prompt and returns the audio data as bytes of an mp3 file alongside the new historyID.
+        Generates speech for the given prompt or audio and returns the audio data as bytes of an mp3 file alongside the new historyID.
 
         Tip:
             If you would like to save the audio to disk or otherwise, you can use helpers.save_audio_bytes().
 
         Args:
-            prompt: The prompt to generate speech for.
+            prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate speech for.
             generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
         Returns:
             A tuple consisting of the bytes of the audio file and its historyID.
@@ -384,18 +396,33 @@ class ElevenLabsVoice:
 
         payload = self._generate_payload(prompt, generationOptions)
         params = self._generate_parameters(generationOptions)
+        if isinstance(prompt, str):
+            requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+        else:
+            if "output_format" in params:
+                params.pop("output_format")
 
-        requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+            source_audio, prompt = io_hash_from_audio(prompt)
+            files = {"audio": source_audio}
+
+            requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, data=payload, params=params, filesData=files)
+
         generationID = f"{self.voiceID} - {prompt} - {time.time()}"
         response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         audioData = response.content
 
-        if "pcm" in generationOptions.output_format:
-            audioData = pcm_to_wav(audioData, int(generationOptions.output_format.lower().replace("pcm_", "")))
-        if "ulaw" in generationOptions.output_format:
-            audioData = ulaw_to_wav(audioData, int(generationOptions.output_format.lower().replace("ulaw_", "")))
 
-        return audioData, response.headers["history-item-id"]
+        if "output_format" in params:
+            if "pcm" in params["output_format"]:
+                audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
+            if "ulaw" in params["output_format"]:
+                audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
+
+        if "history-item-id" in response.headers:
+            history_id = response.headers["history-item-id"]
+        else:
+            history_id = "no_history_id_available"
+        return audioData, history_id
 
 
 
@@ -406,7 +433,7 @@ class ElevenLabsVoice:
         warn("This function is deprecated. Please use generate_play_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
         return self.generate_play_audio_v2(prompt, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd), GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
 
-    def generate_play_audio_v2(self, prompt:str, playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None) -> tuple[bytes,str, sd.OutputStream]:
+    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions()) -> tuple[bytes,str, sd.OutputStream]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -415,8 +442,8 @@ class ElevenLabsVoice:
             If you need faster response times and background downloading and playback, use generate_and_stream_audio_v2.
 
         Parameters:
-            prompt (str): The text prompt to generate audio from.
-            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
+            prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate audio from.
+            playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
 
 
@@ -444,7 +471,10 @@ class ElevenLabsVoice:
         playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
         return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
 
-    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str]], playbackOptions:PlaybackOptions, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> tuple[str, Future[Any]]:
+    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], bytes, BinaryIO],
+                                 playbackOptions:PlaybackOptions=PlaybackOptions(),
+                                 generationOptions:GenerationOptions=GenerationOptions(),
+                                 websocketOptions:WebsocketOptions=WebsocketOptions()) -> tuple[str, Future[Any]]:
         """
         Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
 
@@ -454,16 +484,16 @@ class ElevenLabsVoice:
             Currently, when doing input streaming, the API does not return the history item ID. This function will therefore return None in those cases. I will fix it once it does.
 
         Parameters:
-            prompt (str|Iterator[str]): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming).
-            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
+            prompt (str|Iterator[str]|bytes|BinaryIO): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming) OR the bytes/file pointer of an audio file.
+            playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
 
         Returns:
             A tuple consisting of the historyID for the newly created item and a future which will hold the audio OutputStream (to control playback)
         """
-        if generationOptions is None:
-            generationOptions = GenerationOptions()
+
+        is_sts = False  #This is just a bodge.
 
         #We need the real sample rate.
         generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
@@ -473,16 +503,34 @@ class ElevenLabsVoice:
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
-            requestFunction = lambda: requests.post(apiEndpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
+            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
                                                     params = params, timeout=requests_timeout)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        else:
-            if websocketOptions is None:
-                websocketOptions = WebsocketOptions()
+        elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
+            is_sts = True
+            payload = self._generate_payload(prompt, generationOptions)
+            path = "/speech-to-speech/" + self._voiceID + "/stream"
+            # Using speech to speech
+            params = self._generate_parameters(generationOptions)
+            if "output_format" in params:
+                params.pop("output_format")
+
+            source_audio, prompt = io_hash_from_audio(prompt)
+
+            files = {"audio": source_audio}
+            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, data=payload, stream=True,
+                                                    params=params, timeout=requests_timeout, files=files)
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        elif isinstance(prompt, Iterator):
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+        else:
+            raise ValueError("Unknown type passed for prompt.")
+
         streamer:Union[_Mp3Streamer, _RAWStreamer]
-        if "mp3" in generationOptions.output_format:
+
+        if "mp3" in generationOptions.output_format or is_sts:
             streamer = _Mp3Streamer(playbackOptions)
         else:
             parts = generationOptions.output_format.lower().split("_")
@@ -497,19 +545,19 @@ class ElevenLabsVoice:
             mainThread.start()
         else:
             streamer.begin_streaming(responseConnection, audioStreamFuture, generationOptions, websocketOptions, prompt)
-        if isinstance(responseConnection, requests.Response):
+        if isinstance(responseConnection, requests.Response) and "history-item-id" in responseConnection.headers:
             return responseConnection.headers["history-item-id"], audioStreamFuture
         else:
             return "no_history_id_available", audioStreamFuture
 
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str]], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> queue.Queue:
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> queue.Queue:
         """
         Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
 
         If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
 
         Parameters:
-            prompt (str|Iterator[str]): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming).
+            prompt (str|Iterator[str]): The text prompt or audio bytes/file pointer to generate audio from OR an iterator that returns multiple strings (for input streaming).
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
 
@@ -529,14 +577,31 @@ class ElevenLabsVoice:
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
-            requestFunction = lambda: requests.post(apiEndpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
+            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
                                                     params = params, timeout=requests_timeout)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        else:
+        elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
+            payload = self._generate_payload(prompt, generationOptions)
+            path = "/speech-to-speech/" + self._voiceID + "/stream"
+            # Using speech to speech
+            params = self._generate_parameters(generationOptions)
+            if "output_format" in params:
+                params.pop("output_format")
+
+            source_audio, prompt = io_hash_from_audio(prompt)
+            files = {"audio": source_audio}
+
+            requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, data=payload, stream=True,
+                                                    params=params, timeout=requests_timeout, files=files)
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+        elif isinstance(prompt, Iterator):
             if websocketOptions is None:
                 websocketOptions = WebsocketOptions()
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+        else:
+            raise ValueError("Prompt is of unknown type.")
 
         streamer:_DownloadStreamer = _DownloadStreamer(audioQueue)
         mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, generationOptions, websocketOptions, prompt))
@@ -571,7 +636,7 @@ class ElevenLabsVoice:
         warn("This function is deprecated. Use play_preview_v2 instead.", DeprecationWarning)
         return self.play_preview_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
-    def play_preview_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
+    def play_preview_v2(self, playbackOptions:PlaybackOptions=PlaybackOptions()) -> sd.OutputStream:
         return play_audio_bytes_v2(self.get_preview_bytes(), playbackOptions)
 
 
@@ -1022,7 +1087,7 @@ class _Mp3Streamer(_AudioStreamer):
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
         assert frames == _playbackBlockSize
-
+        readData = None
         while True:
             try:
                 if self._events["downloadDoneEvent"].is_set():
@@ -1263,7 +1328,7 @@ class _RAWStreamer(_AudioStreamer):
 
     def _stream_playback_callback(self, outdata, frames, timeData, status):
         assert frames == _playbackBlockSize
-
+        readData = None
         while True:
             try:
                 if self._events["downloadDoneEvent"].is_set():

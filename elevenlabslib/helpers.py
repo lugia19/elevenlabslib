@@ -5,6 +5,7 @@ import logging
 import queue
 import threading
 import time
+import zlib
 from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List
 from warnings import warn
 
@@ -17,11 +18,19 @@ import os
 from elevenlabslib import ElevenLabsVoice
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 
-apiEndpoint = "https://api.elevenlabs.io/v1"
-defaultHeaders = {'accept': '*/*'}
-#FYI, "pro" = "independent_publisher"
-subscriptionTiers = ["free","starter","creator","pro","growing_business","enterprise"]
+api_endpoint = "https://api.elevenlabs.io/v1"
+default_headers = {'accept': '*/*'}
 requests_timeout = 900
+
+#FYI, "pro" = "independent_publisher"
+subscription_tiers = ["free", "starter", "creator", "pro", "growing_business", "enterprise"]
+
+
+#camelCase vars for compatibility
+subscriptionTiers = subscription_tiers
+defaultHeaders = default_headers
+apiEndpoint = api_endpoint
+
 
 category_shorthands = {
     "generated": "gen",
@@ -41,7 +50,7 @@ def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]
     if path[0] != "/":
         path = "/"+path
-    argsDict["url"] = apiEndpoint + path
+    argsDict["url"] = api_endpoint + path
     argsDict["timeout"] = requests_timeout
     argsDict.pop("path")
 
@@ -79,7 +88,7 @@ def _api_json(path, headers, jsonData, stream=False, params=None) -> requests.Re
         args["params"] = params
     return _api_call_v2(requests.post, args)
 
-def _api_multipart(path, headers, data, filesData=None, stream=False, params=None):
+def _api_multipart(path, headers, data, filesData=None, stream=False, params=None) -> requests.Response:
     args = {
         "path":path,
         "headers":headers,
@@ -97,8 +106,8 @@ def _pretty_print_POST(res:requests.Response):
     req = res.request
     import logging
     logging.basicConfig(level=logging.DEBUG)
-    logging.error(f"RESPONSE DATA: {res.text}")
-    logging.error('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
+    logging.debug(f"RESPONSE DATA: {res.text}")
+    logging.debug('REQUEST THAT CAUSED THE ERROR:\n{}\n{}\r\n{}\r\n\r\n{}'.format(
         '-----------START-----------',
         req.method + ' ' + req.url,
         '\r\n'.join('{}: {}'.format(k, v) for k, v in req.headers.items()),
@@ -111,12 +120,12 @@ class PlaybackOptions:
     This class holds the options for playback.
 
     Parameters:
-        runInBackground (bool): Whether to play/stream audio in the background or wait for it to finish playing.
+        runInBackground (bool, optional): Whether to play/stream audio in the background or wait for it to finish playing. Defaults to False.
         portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
         onPlaybackStart (Callable, optional): Function to call once the playback begins.
         onPlaybackEnd (Callable, optional): Function to call once the playback ends.
     """
-    runInBackground: bool
+    runInBackground: bool = False
     portaudioDeviceID: Optional[int] = None
     onPlaybackStart: Callable[[], Any] = lambda: None
     onPlaybackEnd: Callable[[], Any] = lambda: None
@@ -145,6 +154,8 @@ class GenerationOptions:
         The style and use_speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
 
         Setting style to higher than 0 and enabling use_speaker_boost will both increase latency.
+
+        output_format is currently ignored when using speech to speech.
 
     Warning:
         Using pcm_highest and mp3_highest will cache the resulting quality for the user object. You can use user.update_audio_quality() to force an update.
@@ -486,16 +497,27 @@ class _PeekQueue(queue.Queue):
 def _api_tts_with_concurrency(requestFunction:callable, generationID:str, generationQueue:_PeekQueue) -> requests.Response:
     #Just a helper function which does all the concurrency stuff for TTS calls.
     waitMultiplier = 1
+    response = None
     try:
         response = requestFunction()
         response.raise_for_status() #Just in case the callable isn't a function that already does this.
     except requests.exceptions.RequestException as e:
-        print(e.response.json())
-        if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
-            logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
-            # Insert this in the user's "waiting to be generated" queue.
-            generationQueue.put(generationID)
-            response = None
+        response_json = e.response.json()
+        logging.error(response_json)
+        if "detail" in response_json:
+            error_detail = response_json["detail"]
+            if "status" in error_detail:
+                if error_detail["status"] == "too_many_concurrent_requests":
+                    logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
+                    # Insert this in the user's "waiting to be generated" queue.
+                    generationQueue.put(generationID)
+                    response = None
+                elif error_detail["status"] == "model_can_not_do_voice_conversion":
+                    raise RuntimeError(error_detail["message"])
+                else:
+                    raise e
+            else:
+                raise e
         else:
             raise e
 
@@ -540,3 +562,18 @@ def _text_chunker(chunks: Iterator[str], generation_options:GenerationOptions) -
             buffer += text
     if buffer != "":
         yield apply_pronunciations(buffer + " ", generation_options)
+
+
+def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
+    audio_hash = ""
+    audio_io = None
+    if isinstance(source_audio, bytes):
+        audio_hash = zlib.crc32(source_audio)
+        audio_io = io.BytesIO(source_audio)
+    elif isinstance(source_audio, io.IOBase):
+        source_audio.seek(0)
+        audio_hash = zlib.crc32(source_audio.read())
+        source_audio.seek(0)
+        audio_io = source_audio
+
+    return audio_io, audio_hash
