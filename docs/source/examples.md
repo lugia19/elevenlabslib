@@ -102,19 +102,24 @@ Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c
 from elevenlabslib import *
 import openai
 
-openai.api_key = "your_openai_key_here"
+client = openai.Client(api_key="your_openai_key_here")
+#Using an AsyncClient is also supported - the library will handle the resulting async_generator.
 user = ElevenLabsUser("your_elevenlabs_api_key")
 
 def write(prompt: str):
-    for chunk in openai.ChatCompletion.create(
+    for chunk in client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             stream=True,
     ):
         # Extract the content from the chunk if available
-        if (text_chunk := chunk["choices"][0]["delta"].get("content")) is not None:
-            print(text_chunk)
-            yield text_chunk
+        content = chunk.choices[0].delta.content
+        finish_reason = chunk.choices[0].finish_reason
+        if content:
+            print(content)
+            yield content
+        if finish_reason is not None and finish_reason == 'stop':
+            break
 
 # Generate a text stream
 text_stream = write("Give me a five sentence response.")

@@ -909,7 +909,7 @@ class _AudioStreamer:
         while True:
             try:
                 data = json.loads(websocket.recv())
-                if data["audio"]:
+                if "audio" in data and data["audio"]:
                     chunk = base64.b64decode(data["audio"])
                     self._stream_downloader_chunk_handler(chunk)
                     totalLength += len(chunk)
