@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import io
 import json
@@ -448,6 +449,34 @@ def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFo
         sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
         if callable(getattr(saveLocation,"flush")):
             saveLocation.flush()
+
+#This class is used to make async generators into normal iterators for input streaming. I didn't feel like reworking all the code to be async instead of multithreaded.
+class SyncIterator:
+    def __init__(self, async_iter):
+        self.shared_queue = queue.Queue()
+        self.async_iter = async_iter
+        self.async_thread = threading.Thread(target=self.async_thread_target)
+        self.async_thread.start()
+    def __iter__(self):
+        return self
+
+    def async_thread_target(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def gather_data():
+            async for item in self.async_iter:
+                self.shared_queue.put(item)
+            self.shared_queue.put(None)  # Sentinel value for completion
+
+        loop.run_until_complete(gather_data())
+
+    def __next__(self):
+        item = self.shared_queue.get()
+        if item is None:  # Sentinel value indicating end of data
+            raise StopIteration
+        return item
+
 
 #This class just helps with the callback stuff.
 class _SDPlaybackWrapper:

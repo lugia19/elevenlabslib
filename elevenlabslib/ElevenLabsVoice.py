@@ -3,6 +3,7 @@ from __future__ import annotations
 import audioop
 import base64
 import concurrent.futures
+import inspect
 from concurrent.futures import Future
 from typing import Iterator
 from typing import TYPE_CHECKING
@@ -523,7 +524,9 @@ class ElevenLabsVoice:
                                                     params=params, timeout=requests_timeout, files=files)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        elif isinstance(prompt, Iterator):
+        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
+            if inspect.isasyncgen(prompt):
+                prompt = SyncIterator(prompt)
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
         else:
             raise ValueError("Unknown type passed for prompt.")
@@ -550,7 +553,7 @@ class ElevenLabsVoice:
         else:
             return "no_history_id_available", audioStreamFuture
 
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> queue.Queue:
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=WebsocketOptions()) -> queue.Queue:
         """
         Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
 
@@ -596,9 +599,9 @@ class ElevenLabsVoice:
                                                     params=params, timeout=requests_timeout, files=files)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        elif isinstance(prompt, Iterator):
-            if websocketOptions is None:
-                websocketOptions = WebsocketOptions()
+        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
+            if inspect.isasyncgen(prompt):
+                prompt = SyncIterator(prompt)
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
         else:
             raise ValueError("Prompt is of unknown type.")
