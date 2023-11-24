@@ -264,7 +264,10 @@ class ElevenLabsVoice:
             payload = {"model_id": model_id}
 
         if voice_settings is not None:
-            payload["voice_settings"] = voice_settings
+            if isinstance(prompt, str):
+                payload["voice_settings"] = voice_settings
+            else:
+                payload["voice_settings"] = json.dumps(voice_settings)
 
         return payload
 
