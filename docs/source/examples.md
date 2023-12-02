@@ -19,9 +19,6 @@ save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
 #Fetch the corresponding historyItem
 historyItem = user.get_history_item(generationData[1])
 
-#Rate it
-historyItem.edit_feedback(thumbsUp=True,feedbackText="This text to speech service works very well!")
-
 #Delete it
 historyItem.delete()
 ```

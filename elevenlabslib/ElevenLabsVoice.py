@@ -329,11 +329,6 @@ class ElevenLabsVoice:
 
         return websocket
 
-    def generate_to_historyID(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> str:
-        warn("This function is deprecated. Please use generate_to_historyID_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
-
-        return self.generate_to_historyID_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
-
     def generate_to_historyID_v2(self, prompt: Union[str,bytes,BinaryIO], generationOptions:GenerationOptions=None) -> str:
         """
         Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
@@ -370,11 +365,6 @@ class ElevenLabsVoice:
         else:
             history_id = "no_history_id_available"
         return history_id
-
-    def generate_audio(self, prompt: str, stability: Optional[float] = None, similarity_boost: Optional[float] = None, model_id: str = "eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str]:
-        warn("This function is deprecated. Please use generate_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
-
-        return self.generate_audio_v2(prompt, GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
 
     def generate_audio_v2(self, prompt: Union[str,bytes, BinaryIO], generationOptions:GenerationOptions=None) -> tuple[bytes,str]:
         """
@@ -428,15 +418,6 @@ class ElevenLabsVoice:
             history_id = "no_history_id_available"
         return audioData, history_id
 
-
-
-    def generate_play_audio(self, prompt:str, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                                stability:Optional[float]=None, similarity_boost:Optional[float]=None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[bytes,str, sd.OutputStream]:
-
-        warn("This function is deprecated. Please use generate_play_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
-        return self.generate_play_audio_v2(prompt, PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd), GenerationOptions(model_id, latencyOptimizationLevel, stability, similarity_boost))
-
     def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions()) -> tuple[bytes,str, sd.OutputStream]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
@@ -465,20 +446,10 @@ class ElevenLabsVoice:
 
         return audioData, historyID, outputStream
 
-
-    def generate_stream_audio(self, prompt:str, portaudioDeviceID:Optional[int] = None,
-                                  stability:Optional[float]=None, similarity_boost:Optional[float]=None, streamInBackground=False,
-                                  onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None, model_id:str="eleven_monolingual_v1", latencyOptimizationLevel:int=0) -> tuple[
-        str, Future[Any]]:
-        warn("This function is deprecated. Please use generate_stream_audio_v2() instead, which supports the new options for the v2 models. See the porting guide on https://elevenlabslib.readthedocs.io for more information.", DeprecationWarning)
-        generationOptions = GenerationOptions(model_id,latencyOptimizationLevel,stability,similarity_boost)
-        playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
-        return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
-
     def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], AsyncIterator, bytes, BinaryIO],
                                  playbackOptions:PlaybackOptions=PlaybackOptions(),
                                  generationOptions:GenerationOptions=GenerationOptions(),
-                                 websocketOptions:WebsocketOptions=WebsocketOptions()) -> tuple[str, Future[Any]]:
+                                 websocketOptions:WebsocketOptions=WebsocketOptions()) -> tuple[str, Future[Any], Optional[queue.Queue]]:
         """
         Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
 
@@ -494,7 +465,10 @@ class ElevenLabsVoice:
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
 
         Returns:
-            A tuple consisting of the historyID for the newly created item and a future which will hold the audio OutputStream (to control playback)
+            A tuple consisting of:
+            -HistoryID for the newly created item
+            -Future which will hold the audio OutputStream (to control playback)
+            -Queue for transcripts, with None as the termination indicator.
         """
 
         is_sts = False  #This is just a bodge.
@@ -551,12 +525,18 @@ class ElevenLabsVoice:
             mainThread.start()
         else:
             streamer.begin_streaming(responseConnection, audioStreamFuture, generationOptions, websocketOptions, prompt)
+        history_id = "no_history_id_available"
+        transcript_queue = None
         if isinstance(responseConnection, requests.Response) and "history-item-id" in responseConnection.headers:
-            return responseConnection.headers["history-item-id"], audioStreamFuture
-        else:
-            return "no_history_id_available", audioStreamFuture
+            history_id = responseConnection.headers["history-item-id"]
 
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=WebsocketOptions()) -> queue.Queue:
+        if isinstance(responseConnection, websockets.sync.client.ClientConnection):
+            transcript_queue = streamer.transcript_queue
+
+
+        return history_id, audioStreamFuture, transcript_queue
+
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=WebsocketOptions()) -> (queue.Queue, Optional[queue.Queue]):
         """
         Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
 
@@ -568,7 +548,9 @@ class ElevenLabsVoice:
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
 
         Returns:
-            The queue which will have the audio data put in it, with None acting as an indicator for when it's done.
+            A tuple consisting of:
+            -Queue for the audio, with None acting as the termination indicator.
+            -Queue for transcripts, with None as the termination indicator.
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
@@ -613,7 +595,10 @@ class ElevenLabsVoice:
         mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, generationOptions, websocketOptions, prompt))
         mainThread.start()
 
-        return audioQueue
+        if isinstance(responseConnection, requests.Response):
+            return audioQueue, None
+        else:
+            return audioQueue, streamer.transcript_queue
 
     def get_preview_url(self) -> str|None:
         """
@@ -636,11 +621,6 @@ class ElevenLabsVoice:
             raise RuntimeError("No preview URL available!")
         response = requests.get(previewURL, allow_redirects=True, timeout=requests_timeout)
         return response.content
-
-    def play_preview(self, playInBackground:bool, portaudioDeviceID:Optional[int] = None,
-                                onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-        warn("This function is deprecated. Use play_preview_v2 instead.", DeprecationWarning)
-        return self.play_preview_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
 
     def play_preview_v2(self, playbackOptions:PlaybackOptions=PlaybackOptions()) -> sd.OutputStream:
         return play_audio_bytes_v2(self.get_preview_bytes(), playbackOptions)
@@ -870,6 +850,8 @@ class BodgedSoundFile(sf.SoundFile):
 class _AudioStreamer:
     def __init__(self):
         self._events = dict()
+        self._current_audio_ms = 0
+        self.transcript_queue = queue.Queue()   #Holds the transcripts for the audio data
 
     def _stream_downloader_function(self, streamedResponse: requests.Response):
         # This is the function running in the download thread.
@@ -888,39 +870,60 @@ class _AudioStreamer:
         totalLength = 0
         logging.debug("Starting iter...")
 
-        for text_chunk in _text_chunker(text_iterator, generation_options):
-            data = dict(text=text_chunk, try_trigger_generation=websocket_options.try_trigger_generation)
-            try:
-                websocket.send(json.dumps(data))
-            except websockets.exceptions.ConnectionClosedError as e:
-                logging.exception(f"Generation failed, shutting down: {e}")
-                raise e
+        def sender():
+            for text_chunk in _text_chunker(text_iterator, generation_options):
+                sent_data = dict(text=text_chunk, try_trigger_generation=websocket_options.try_trigger_generation)
+                try:
+                    websocket.send(json.dumps(sent_data))
+                except websockets.exceptions.ConnectionClosedError as e:
+                    logging.exception(f"Generation failed, shutting down: {e}")
+                    raise e
 
-            try:
-                data = json.loads(websocket.recv(1e-4))
-                if data["audio"]:
-                    chunk = base64.b64decode(data["audio"])
-                    self._stream_downloader_chunk_handler(chunk)
-                    totalLength += len(chunk)
-            except TimeoutError as e:
-                pass
+            websocket.send(json.dumps(dict(text=""))) # Send end of stream
 
-        # Send end of stream
-        websocket.send(json.dumps(dict(text="")))
+        sender_thread = threading.Thread(target=sender)
+        sender_thread.start()
 
-        # Receive remaining audio
+        # Receive remaining audio after sender has finished
         while True:
             try:
-                data = json.loads(websocket.recv())
-                if "audio" in data and data["audio"]:
+                data = json.loads(websocket.recv()) #We block because we know we're waiting on more messages.
+                logging.debug("--------New message--------")
+                audio_data = data.get("audio", None)
+                if audio_data:
                     chunk = base64.b64decode(data["audio"])
                     self._stream_downloader_chunk_handler(chunk)
                     totalLength += len(chunk)
+
+                alignment_data = data.get("normalizedAlignment", None)
+
+                if alignment_data is not None:
+                    #self._current_audio_ms = 0
+                    formatted_list = list()
+                    for i in range(len(alignment_data["chars"])):
+                        formatted_list.append({
+                            "character": alignment_data["chars"][i],
+                            "start_time_ms": alignment_data["charStartTimesMs"][i] + self._current_audio_ms,
+                            "duration_ms": alignment_data["charDurationsMs"][i]
+                        })
+
+                    self._current_audio_ms += formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
+
+                    if self.transcript_queue is not None:
+                        self.transcript_queue.put(formatted_list)
+
+                is_final = data.get("isFinal", False)
+                if is_final:
+                    logging.debug("websocket final message recieved.")
+                    break   #We break out early.
             except websockets.exceptions.ConnectionClosed:
                 break
 
+        self.transcript_queue.put(None) #We're done with the transcripts
+
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
+        sender_thread.join()    #Just in case something went wrong.
 
     def _stream_downloader_chunk_handler(self, chunk):
         pass
@@ -948,8 +951,6 @@ class _DownloadStreamer(_AudioStreamer):
 
     def _stream_downloader_chunk_handler(self, chunk):
         self.destination_queue.put(chunk)
-
-
 
 class _Mp3Streamer(_AudioStreamer):
 
