@@ -5,7 +5,7 @@ import base64
 import concurrent.futures
 import inspect
 from concurrent.futures import Future
-from typing import Iterator
+from typing import Iterator, AsyncIterator
 from typing import TYPE_CHECKING
 
 import numpy
@@ -475,7 +475,7 @@ class ElevenLabsVoice:
         playbackOptions = PlaybackOptions(streamInBackground,portaudioDeviceID,onPlaybackStart,onPlaybackEnd)
         return self.generate_stream_audio_v2(prompt, playbackOptions, generationOptions)
 
-    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], bytes, BinaryIO],
+    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], AsyncIterator, bytes, BinaryIO],
                                  playbackOptions:PlaybackOptions=PlaybackOptions(),
                                  generationOptions:GenerationOptions=GenerationOptions(),
                                  websocketOptions:WebsocketOptions=WebsocketOptions()) -> tuple[str, Future[Any]]:
