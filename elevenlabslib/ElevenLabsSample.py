@@ -74,7 +74,7 @@ class ElevenLabsSample:
         Returns:
             The sounddevice OutputStream of the playback.
         """
-        return play_audio_bytes_v2(self.get_audio_bytes(), playbackOptions)
+        return play_audio_v2(self.get_audio_bytes(), playbackOptions)
 
     def delete(self):
         """

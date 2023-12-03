@@ -4,6 +4,7 @@ import audioop
 import base64
 import concurrent.futures
 import inspect
+import math
 from concurrent.futures import Future
 from typing import Iterator, AsyncIterator
 from typing import TYPE_CHECKING
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker, _open_soundfile
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -366,7 +367,58 @@ class ElevenLabsVoice:
             history_id = "no_history_id_available"
         return history_id
 
-    def generate_audio_v2(self, prompt: Union[str,bytes, BinaryIO], generationOptions:GenerationOptions=None) -> tuple[bytes,str]:
+    def _generate_audio_prompting(self, prompt:str, generationOptions:GenerationOptions, promptingOptions:PromptingOptions):
+        """
+        Internal use only.
+        """
+        def write():
+            for _ in range(1):
+                yield f'{promptingOptions.pre_prompt}"{prompt}"{promptingOptions.post_prompt}'
+
+        audio_queue, transcript_queue = self.stream_audio_no_playback(write(), generationOptions)
+        character_timings = transcript_queue.get()
+
+        all_timings = list()
+        while character_timings is not None:
+            all_timings.extend(character_timings)
+            all_timings[-1]["is_chunk_end"] = True
+            character_timings = transcript_queue.get()
+
+        all_audio = b""
+        audio_chunk = audio_queue.get()
+        while audio_chunk is not None:
+            all_audio += audio_chunk
+            audio_chunk = audio_queue.get()
+
+        start_time = None
+        end_time = None
+        for idx, item in enumerate(all_timings):
+            if item["character"] == '"':
+                if start_time is None:
+                    start_time = item["start_time_ms"] / 1000
+                else:
+                    end_time = (item["start_time_ms"] + item["duration_ms"]*promptingOptions.last_character_duration_multiplier) / 1000  #We skim a little bit (5%) from the duration to avoid the post-prompt getting in the way.
+
+        tempsf = _open_soundfile(all_audio, generationOptions.output_format)
+        data = tempsf.read(dtype="float32")
+        samplerate = tempsf.samplerate
+        start_sample = math.floor(start_time * samplerate)
+        end_sample = math.ceil(end_time * samplerate)
+        segment = data[start_sample:end_sample]
+
+        segment = np.concatenate((segment, np.zeros(int(samplerate * promptingOptions.end_silence_padding)))).astype("float32")  # Add 0.2 seconds of silence at the end to make it flow more naturally.
+        final_audio = io.BytesIO()
+
+        audio_extension = ""
+        if "mp3" in generationOptions.output_format: audio_extension = "mp3"
+        if "pcm" in generationOptions.output_format: audio_extension = "wav"
+        if "ulaw" in generationOptions.output_format: audio_extension = "wav"
+        save_audio_v2(segment, final_audio, audio_extension)
+        final_audio.seek(0)
+        audioData = final_audio.read()
+        return audioData
+
+    def generate_audio_v2(self, prompt: Union[str,bytes, BinaryIO], generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str]:
         """
         Generates speech for the given prompt or audio and returns the audio data as bytes of an mp3 file alongside the new historyID.
 
@@ -376,14 +428,13 @@ class ElevenLabsVoice:
         Args:
             prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate speech for.
             generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
+            promptingOptions (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
         Returns:
             A tuple consisting of the bytes of the audio file and its historyID.
 
         Note:
             If using PCM as the output_format, the return audio bytes are a WAV.
         """
-        if generationOptions is None:
-            generationOptions = GenerationOptions()
 
         #Since we need the sample rate directly, make sure it's a real one.
         generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
@@ -401,24 +452,28 @@ class ElevenLabsVoice:
 
             requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, data=payload, params=params, filesData=files)
 
-        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-        response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        audioData = response.content
-
-
-        if "output_format" in params:
-            if "pcm" in params["output_format"]:
-                audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
-            if "ulaw" in params["output_format"]:
-                audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
-
-        if "history-item-id" in response.headers:
-            history_id = response.headers["history-item-id"]
-        else:
+        if isinstance(prompt,str) and promptingOptions is not None:
+            audioData = self._generate_audio_prompting(prompt, generationOptions, promptingOptions)
             history_id = "no_history_id_available"
+        else:
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+            audioData = responseConnection.content
+
+            if "output_format" in params:
+                if "pcm" in params["output_format"]:
+                    audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
+                if "ulaw" in params["output_format"]:
+                    audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
+
+            if "history-item-id" in responseConnection.headers:
+                history_id = responseConnection.headers["history-item-id"]
+            else:
+                history_id = "no_history_id_available"
+
         return audioData, history_id
 
-    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions()) -> tuple[bytes,str, sd.OutputStream]:
+    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str, sd.OutputStream]:
         """
         Generate audio bytes from the given prompt and play them using sounddevice.
 
@@ -430,7 +485,7 @@ class ElevenLabsVoice:
             prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate audio from.
             playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
-
+            promptingOptions (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
 
         Returns:
            A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
@@ -441,8 +496,8 @@ class ElevenLabsVoice:
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
-        audioData, historyID = self.generate_audio_v2(prompt, generationOptions)
-        outputStream = play_audio_bytes_v2(audioData, playbackOptions)
+        audioData, historyID = self.generate_audio_v2(prompt, generationOptions, promptingOptions)
+        outputStream = play_audio_v2(audioData, playbackOptions, self._linkedUser.get_real_audio_format(generationOptions).output_format)
 
         return audioData, historyID, outputStream
 
@@ -623,7 +678,7 @@ class ElevenLabsVoice:
         return response.content
 
     def play_preview_v2(self, playbackOptions:PlaybackOptions=PlaybackOptions()) -> sd.OutputStream:
-        return play_audio_bytes_v2(self.get_preview_bytes(), playbackOptions)
+        return play_audio_v2(self.get_preview_bytes(), playbackOptions)
 
 
 class ElevenLabsEditableVoice(ElevenLabsVoice):
@@ -673,55 +728,6 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
     """
     def __init__(self, voiceData, linkedUser: ElevenLabsUser):
         super().__init__(voiceData, linkedUser)
-
-    def set_sharing(self, sharingEnabled:bool) -> Union[str,None]:
-        """
-        Edits the sharing status, assuming it is not a copied voice.
-
-        Args:
-            sharingEnabled (bool): Whether to enable or disable sharing.
-
-        Returns:
-            str|None: The share URL for the voice, if you enabled sharing, or None if you disabled it.
-        """
-        warn("This is currently broken, as ElevenLabs have disabled accessing the sharing endpoints via the API key.")
-
-        payload = {
-            "enable":sharingEnabled,
-            "emails":[]
-        }
-        sharingInfo = self.update_data()["sharing"]
-        if sharingInfo is not None and sharingInfo["status"] == "copied":
-            raise RuntimeError("Cannot change sharing status of copied voices!")
-
-        response = _api_json("/voices/" + self._voiceID + "/share", self._linkedUser.headers, jsonData=payload)
-        if sharingEnabled:
-            return self.get_share_link()
-        else:
-            return None
-
-    def set_library_sharing(self, sharingEnabled:bool) -> None:
-        """
-        Edits the library sharing status, assuming it is not a copied voice.
-
-        Note:
-            If you try to enable library sharing but don't have normal sharing enabled, it will be enabled automatically.
-
-            The same does NOT apply in reverse - if you disable library sharing, normal sharing will remain enabled.
-
-        Args:
-            sharingEnabled (bool): Whether to enable or disable public library sharing.
-
-        """
-        sharingEnabledString = str(sharingEnabled).lower()
-        sharingInfo = self.update_data()["sharing"]
-        if sharingInfo is not None and sharingInfo["status"] == "copied":
-            raise RuntimeError("Cannot change library sharing status of copied voices!")
-
-        if sharingInfo is None or sharingInfo["status"] != "enabled" and sharingEnabled:
-            self.set_sharing(sharingEnabled)
-
-        response = _api_multipart("/voices/" + self._voiceID + "/share-library", self._linkedUser.headers, data=sharingEnabledString)
 
     def get_share_link(self) -> str:
         """
@@ -888,7 +894,6 @@ class _AudioStreamer:
         while True:
             try:
                 data = json.loads(websocket.recv()) #We block because we know we're waiting on more messages.
-                logging.debug("--------New message--------")
                 audio_data = data.get("audio", None)
                 if audio_data:
                     chunk = base64.b64decode(data["audio"])

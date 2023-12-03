@@ -211,11 +211,11 @@ class ElevenLabsHistoryItem:
             If either of the above assumptions isn't true, simply use the audio functions in helpers.py to play back the audio yourself.
         """
         audioBytes = self.get_audio_bytes()
+        output_format = "mp3_44100_128"
         if _audio_is_raw(audioBytes):
-            sampleRate = int(self._parentUser.get_real_audio_format(GenerationOptions(output_format="pcm_highest")).output_format.lower().replace("pcm_",""))
-            audioBytes = pcm_to_wav(audioBytes, sampleRate)
+            output_format = self._parentUser.get_real_audio_format(GenerationOptions(output_format="pcm_highest")).output_format
 
-        return play_audio_bytes_v2(audioBytes, playbackOptions)
+        return play_audio_v2(audioBytes, playbackOptions, output_format)
 
     def fetch_feedback(self):
         """

@@ -231,6 +231,29 @@ class WebsocketOptions:
             if not(50 <= value <= 500):
                 raise ValueError("Chunk length outside the [50,500] range.")
 
+@dataclasses.dataclass
+class PromptingOptions:
+    """
+    This class holds the options for pre/post-prompting the audio, to add emotion.
+    Parameters:
+        pre_prompt (str, optional): Prompt which will be place before the quoted text.
+        post_prompt (str, optional): Prompt which will be placed after the quoted text.
+        end_silence_padding (float, optional): How many seconds of silence to add at the end. Defaults to 0.2s
+        last_character_duration_multiplier (float, optional): Multiplier for the duration of the last character (Between 0 and 1). Defaults to 0.95 if a post-prompt is present to avoid bleedover.
+    """
+    pre_prompt:str = ""
+    post_prompt:str = ""
+    end_silence_padding:float = 0.2
+    last_character_duration_multiplier:Optional[float] = None
+    def __post_init__(self):
+        if self.last_character_duration_multiplier is None:
+            if self.post_prompt != "":
+                self.last_character_duration_multiplier = 0.95
+            else:
+                self.last_character_duration_multiplier = 1
+        elif self.last_character_duration_multiplier > 1:
+            raise ValueError("Please input a valid value for last_character_duration_multiplier (between 0 and 1).")
+
 
 class Synthesizer:
     """
@@ -361,14 +384,14 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.
         playbackWrapper.stream.start()
         return playbackWrapper.stream
 
-def play_audio_v2(audioData:Union[bytes, numpy.ndarray], audioFormat:Union[str, GenerationOptions], playbackOptions:PlaybackOptions) -> sd.OutputStream:
+def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:PlaybackOptions, audioFormat:Union[str, GenerationOptions]="mp3_44100_128") -> sd.OutputStream:
     """
     Plays the given audio and calls the given functions.
 
     Parameters:
          audioData: The audio data to play, either in bytes or as a numpy array
-         audioFormat: The format of audioData. Has to be one of the values allowed for GenerationOptions.output_format, and not one of the ones with _highest.
          playbackOptions: The playback options.
+         audioFormat: The format of audioData - same formats used for GenerationOptions. If not mp3, then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
     Returns:
         None
     """
@@ -382,8 +405,10 @@ def play_audio_v2(audioData:Union[bytes, numpy.ndarray], audioFormat:Union[str, 
         audioFormat = audioFormat.output_format
 
     if "highest" in audioFormat:
-        raise ValueError("Please specify the actual samplerate in the format. Use user.get_real_audio_format if necessary.")
-
+        if "mp3" in audioFormat:
+            audioFormat = "mp3_44100_128"
+        else:
+            raise ValueError("Please specify the actual samplerate in the format. Use user.get_real_audio_format if necessary.")
     playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions, audioFormat)
 
     if not playbackOptions.runInBackground:
@@ -449,7 +474,7 @@ def _open_soundfile(audioData:bytes, audioFormat:str) -> soundfile.SoundFile:
     else:
         return soundfile.SoundFile(io.BytesIO(audioData))
 
-def save_audio_v2(audioData:Union[bytes, numpy.ndarray], saveLocation:Union[BinaryIO,str], inputFormat:Union[str, GenerationOptions], outputFormat:str) -> None:
+def save_audio_v2(audioData:Union[bytes, numpy.ndarray], saveLocation:Union[BinaryIO,str], outputFormat:str, inputFormat:Union[str, GenerationOptions]="mp3_44100_128") -> None:
     """
     This function saves the audio data to the specified location OR file-like object.
     soundfile is used for the conversion, so it supports any format it does.
@@ -457,15 +482,18 @@ def save_audio_v2(audioData:Union[bytes, numpy.ndarray], saveLocation:Union[Bina
     Parameters:
         audioData (bytes): The audio data.
         saveLocation (str|BinaryIO): The path (or file-like object) where the data will be saved.
-        inputFormat (str): The format of audioData. Has to be one of the values allowed for GenerationOptions.output_format, and not one of the ones with _highest.
         outputFormat (str): The format in which the audio will be saved (mp3/wav/ogg/etc).
+        inputFormat: The format of audioData - same formats used for GenerationOptions. If not mp3, then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
     """
 
     if isinstance(inputFormat, GenerationOptions):
         inputFormat = inputFormat.output_format
 
     if "highest" in inputFormat:
-        raise ValueError("Please specify the actual samplerate in the format. Use user.get_real_audio_format if necessary.")
+        if "mp3" in inputFormat:
+            inputFormat = "mp3_44100_128"
+        else:
+            raise ValueError("Please specify the actual samplerate in the format. Use user.get_real_audio_format if necessary.")
 
     samplerate = int(inputFormat.split("_")[1])
     if isinstance(audioData, bytes):

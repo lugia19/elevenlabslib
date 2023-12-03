@@ -277,7 +277,7 @@ try:
     temporaryVoiceID, generatedAudio = user.design_voice(gender="female", accent="american", age="young", accent_strength=1.0)
     
     #Play back the generated audio.
-    play_audio_bytes_v2(generatedAudio, PlaybackOptions(runInBackground=False))
+    play_audio_v2(generatedAudio, PlaybackOptions(runInBackground=False))
     
     #Add the voice to the account.
     newGeneratedVoice = user.save_designed_voice(temporaryVoiceID, newVoiceName)
@@ -313,7 +313,7 @@ downloadedItems = user.download_history_items_v2(testItems)
 
 #Play them back
 for historyID, downloadDataTuple in downloadedItems.items():
-    play_audio_bytes_v2(downloadDataTuple[0], PlaybackOptions(runInBackground=False))
+    play_audio_v2(downloadDataTuple[0], PlaybackOptions(runInBackground=False))
 
 #Delete them
 for item in testItems:
