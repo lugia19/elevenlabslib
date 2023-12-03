@@ -126,7 +126,7 @@ voice = user.get_available_voices()[0]
 
 # Stream the audio
 # WARNING: The historyID will be "no_history_id_available", due to the API currently not returning it.
-historyID, AudioStreamFuture = voice.generate_stream_audio_v2(
+historyID, AudioStreamFuture, transcriptQueue = voice.generate_stream_audio_v2(
     text_stream, PlaybackOptions(runInBackground=False),
     GenerationOptions(latencyOptimizationLevel=4),
     WebsocketOptions(try_trigger_generation=True, chunk_length_schedule=[50])

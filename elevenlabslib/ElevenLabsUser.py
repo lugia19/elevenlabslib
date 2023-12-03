@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PeekQueue, _audio_is_raw
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PeekQueue
 
 
 class ElevenLabsUser:
