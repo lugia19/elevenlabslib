@@ -997,7 +997,6 @@ class _AudioStreamer:
         sender_thread = threading.Thread(target=sender)
         sender_thread.start()
 
-        # Receive remaining audio after sender has finished
         while True:
             try:
                 data = json.loads(self._connection.recv()) #We block because we know we're waiting on more messages.
