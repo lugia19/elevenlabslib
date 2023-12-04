@@ -14,13 +14,27 @@ premadeVoice = user.get_voices_by_name("Rachel")[0]
 generationData = premadeVoice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True), GenerationOptions(stability=0.4))
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
-save_audio_bytes(generationData[0], "testAudio.ogg", outputFormat="ogg")
+save_audio_v2(generationData[0], "testAudio.ogg", outputFormat="ogg")
 
 #Fetch the corresponding historyItem
 historyItem = user.get_history_item(generationData[1])
 
 #Delete it
 historyItem.delete()
+```
+
+## Use prompting to add emotion
+```python
+from elevenlabslib import *
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+#Low stability makes prompting more effective.
+generation_options = GenerationOptions(stability=0.1)
+prompting_options = PromptingOptions(post_prompt="she shouted angrily.")
+
+#The spoken audio will only contain chosen text, and will cut out the pre/post prompt.
+voice.generate_stream_audio_v2("I've had enough!", generationOptions = generation_options, promptingOptions = prompting_options)
 ```
 
 ## Speech to speech
@@ -30,8 +44,7 @@ from elevenlabslib import *
 user = ElevenLabsUser("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-#Note: As of right now, overriding parameters in a request (such as stability) does not work for s2s.
-generation_options = GenerationOptions(model_id="eleven_english_sts_v2")
+generation_options = GenerationOptions(model_id="eleven_english_sts_v2", stability=0.2)
 
 source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
 #sorce_audio can also be bytes, to allow you to pass input from a microphone:

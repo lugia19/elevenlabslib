@@ -238,20 +238,29 @@ class PromptingOptions:
     Parameters:
         pre_prompt (str, optional): Prompt which will be place before the quoted text.
         post_prompt (str, optional): Prompt which will be placed after the quoted text.
-        end_silence_padding (float, optional): How many seconds of silence to add at the end. Defaults to 0.2s
-        last_character_duration_multiplier (float, optional): Multiplier for the duration of the last character (Between 0 and 1). Defaults to 0.95 if a post-prompt is present to avoid bleedover.
+        open_quote_duration_multiplier (float, optional): Multiplier indicating how much of the opening quote will be spoken (Between 0 and 1). Defaults to 0.70 if a pre-prompt is present to avoid bleedover.
+        close_quote_duration_multiplier (float, optional): Multiplier for the duration of the closing quote (Between 0 and 1). Defaults to 0.70 if a post-prompt is present to avoid bleedover.
     """
     pre_prompt:str = ""
     post_prompt:str = ""
-    end_silence_padding:float = 0.2
-    last_character_duration_multiplier:Optional[float] = None
+    open_quote_duration_multiplier: Optional[float] = None
+    close_quote_duration_multiplier:Optional[float] = None
+
     def __post_init__(self):
-        if self.last_character_duration_multiplier is None:
+        if "\"" in self.pre_prompt or "\"" in self.post_prompt:
+            raise ValueError("Please do not include any quotes (\") in the post/pre-prompt.")
+        if self.close_quote_duration_multiplier is None:
             if self.post_prompt != "":
-                self.last_character_duration_multiplier = 0.95
+                self.close_quote_duration_multiplier = 0.50
             else:
-                self.last_character_duration_multiplier = 1
-        elif self.last_character_duration_multiplier > 1:
+                self.close_quote_duration_multiplier = 1
+
+        if self.open_quote_duration_multiplier is None:
+            if self.pre_prompt != "":
+                self.open_quote_duration_multiplier = 0.50
+            else:
+                self.open_quote_duration_multiplier = 1
+        elif self.close_quote_duration_multiplier > 1:
             raise ValueError("Please input a valid value for last_character_duration_multiplier (between 0 and 1).")
 
 
@@ -384,14 +393,14 @@ def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.
         playbackWrapper.stream.start()
         return playbackWrapper.stream
 
-def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:PlaybackOptions, audioFormat:Union[str, GenerationOptions]="mp3_44100_128") -> sd.OutputStream:
+def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:PlaybackOptions=PlaybackOptions(), audioFormat:Union[str, GenerationOptions]="mp3_44100_128") -> sd.OutputStream:
     """
     Plays the given audio and calls the given functions.
 
     Parameters:
-         audioData: The audio data to play, either in bytes or as a numpy array
-         playbackOptions: The playback options.
-         audioFormat: The format of audioData - same formats used for GenerationOptions. If not mp3, then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
+         audioData (bytes|numpy.ndarray): The audio data to play, either in bytes or as a numpy array (float32!)
+         playbackOptions (PlaybackOptions, optional): The playback options.
+         audioFormat (str, optional): The format of audioData - same formats used for GenerationOptions. If not mp3, then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
     Returns:
         None
     """

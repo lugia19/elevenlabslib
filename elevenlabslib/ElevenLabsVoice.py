@@ -186,7 +186,7 @@ class ElevenLabsVoice:
 
     @property
     def settings(self):
-        if self._settings is None:  # TODO: Remove this once this no longer happens (aka, once the bug with the /voices endpoint is fixed)
+        if self._settings is None:
             self.update_data()
 
         return self._settings
@@ -369,51 +369,24 @@ class ElevenLabsVoice:
 
     def _generate_audio_prompting(self, prompt:str, generationOptions:GenerationOptions, promptingOptions:PromptingOptions):
         """
-        Internal use only.
+        Internal use only, just wraps stream_audio_no_playback.
         """
-        def write():
-            for _ in range(1):
-                yield f'{promptingOptions.pre_prompt}"{prompt}"{promptingOptions.post_prompt}'
+        audio_queue, transcript_queue = self.stream_audio_no_playback(prompt, generationOptions, promptingOptions=promptingOptions)
 
-        audio_queue, transcript_queue = self.stream_audio_no_playback(write(), generationOptions)
-        character_timings = transcript_queue.get()
-
-        all_timings = list()
-        while character_timings is not None:
-            all_timings.extend(character_timings)
-            all_timings[-1]["is_chunk_end"] = True
-            character_timings = transcript_queue.get()
-
-        all_audio = b""
-        audio_chunk = audio_queue.get()
+        audio_chunk: numpy.ndarray = audio_queue.get()
+        shape_of_chunk = audio_chunk.shape
+        empty_shape = (0,) + shape_of_chunk[1:]
+        all_audio = np.empty(empty_shape, dtype=audio_chunk.dtype)
         while audio_chunk is not None:
-            all_audio += audio_chunk
+            all_audio = np.concatenate((all_audio, audio_chunk), axis=0)
             audio_chunk = audio_queue.get()
-
-        start_time = None
-        end_time = None
-        for idx, item in enumerate(all_timings):
-            if item["character"] == '"':
-                if start_time is None:
-                    start_time = item["start_time_ms"] / 1000
-                else:
-                    end_time = (item["start_time_ms"] + item["duration_ms"]*promptingOptions.last_character_duration_multiplier) / 1000  #We skim a little bit (5%) from the duration to avoid the post-prompt getting in the way.
-
-        tempsf = _open_soundfile(all_audio, generationOptions.output_format)
-        data = tempsf.read(dtype="float32")
-        samplerate = tempsf.samplerate
-        start_sample = math.floor(start_time * samplerate)
-        end_sample = math.ceil(end_time * samplerate)
-        segment = data[start_sample:end_sample]
-
-        segment = np.concatenate((segment, np.zeros(int(samplerate * promptingOptions.end_silence_padding)))).astype("float32")  # Add 0.2 seconds of silence at the end to make it flow more naturally.
         final_audio = io.BytesIO()
 
         audio_extension = ""
         if "mp3" in generationOptions.output_format: audio_extension = "mp3"
         if "pcm" in generationOptions.output_format: audio_extension = "wav"
         if "ulaw" in generationOptions.output_format: audio_extension = "wav"
-        save_audio_v2(segment, final_audio, audio_extension)
+        save_audio_v2(all_audio, final_audio, audio_extension)
         final_audio.seek(0)
         audioData = final_audio.read()
         return audioData
@@ -504,7 +477,8 @@ class ElevenLabsVoice:
     def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], AsyncIterator, bytes, BinaryIO],
                                  playbackOptions:PlaybackOptions=PlaybackOptions(),
                                  generationOptions:GenerationOptions=GenerationOptions(),
-                                 websocketOptions:WebsocketOptions=WebsocketOptions()) -> tuple[str, Future[Any], Optional[queue.Queue]]:
+                                 websocketOptions:WebsocketOptions=WebsocketOptions(),
+                                 promptingOptions:PromptingOptions=None) -> tuple[str, Future[Any], Optional[queue.Queue]]:
         """
         Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
 
@@ -518,7 +492,7 @@ class ElevenLabsVoice:
             playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
-
+            promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
         Returns:
             A tuple consisting of:
             -HistoryID for the newly created item
@@ -531,7 +505,17 @@ class ElevenLabsVoice:
         #We need the real sample rate.
         generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
 
-        if isinstance(prompt, str):
+        if isinstance(prompt, str) and promptingOptions is not None:
+            old_prompt = prompt
+            def write():
+                for _ in range(1):
+                    yield f'{promptingOptions.pre_prompt} "{old_prompt}" {promptingOptions.post_prompt}'
+            prompt = write()
+            websocketOptions = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
+        else:
+            promptingOptions = None     #Ignore them if not generating a normal string.
+
+        if isinstance(prompt, str) and promptingOptions is None:
             payload = self._generate_payload(prompt, generationOptions)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
@@ -556,7 +540,7 @@ class ElevenLabsVoice:
                                                     params=params, timeout=requests_timeout, files=files)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
+        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or promptingOptions is not None:
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
             responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
@@ -566,20 +550,17 @@ class ElevenLabsVoice:
         streamer:Union[_Mp3Streamer, _RAWStreamer]
 
         if "mp3" in generationOptions.output_format or is_sts:
-            streamer = _Mp3Streamer(playbackOptions)
+            streamer = _Mp3Streamer(playbackOptions, responseConnection, generationOptions, websocketOptions, prompt, promptingOptions)
         else:
-            parts = generationOptions.output_format.lower().split("_")
-            subtype = parts[0]
-            samplerate = int(parts[1])
-            streamer = _RAWStreamer(playbackOptions, subtype, samplerate)
+            streamer = _RAWStreamer(playbackOptions, responseConnection, generationOptions, websocketOptions, prompt, promptingOptions)
 
         audioStreamFuture = concurrent.futures.Future()
 
         if playbackOptions.runInBackground:
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, audioStreamFuture, generationOptions, websocketOptions, prompt))
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(audioStreamFuture,))
             mainThread.start()
         else:
-            streamer.begin_streaming(responseConnection, audioStreamFuture, generationOptions, websocketOptions, prompt)
+            streamer.begin_streaming(audioStreamFuture)
         history_id = "no_history_id_available"
         transcript_queue = None
         if isinstance(responseConnection, requests.Response) and "history-item-id" in responseConnection.headers:
@@ -591,7 +572,9 @@ class ElevenLabsVoice:
 
         return history_id, audioStreamFuture, transcript_queue
 
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO], generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=WebsocketOptions()) -> (queue.Queue, Optional[queue.Queue]):
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO],
+                                 generationOptions:GenerationOptions=GenerationOptions(), websocketOptions:WebsocketOptions=WebsocketOptions(),
+                                 promptingOptions:PromptingOptions=None) -> (queue.Queue[numpy.ndarray], Optional[queue.Queue[str]]):
         """
         Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
 
@@ -601,19 +584,25 @@ class ElevenLabsVoice:
             prompt (str|Iterator[str]): The text prompt or audio bytes/file pointer to generate audio from OR an iterator that returns multiple strings (for input streaming).
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
-
+            promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
         Returns:
             A tuple consisting of:
-            -Queue for the audio, with None acting as the termination indicator.
+            -Queue for the audio as float32 numpy arrays, with None acting as the termination indicator.
             -Queue for transcripts, with None as the termination indicator.
         """
-        if generationOptions is None:
-            generationOptions = GenerationOptions()
-
-        audioQueue = queue.Queue()
 
         #We need the real sample rate.
         generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
+
+        if isinstance(prompt, str) and promptingOptions is not None:
+            original_prompt = prompt
+            def write():
+                for _ in range(1):
+                    yield f'{promptingOptions.pre_prompt} "{original_prompt}" {promptingOptions.post_prompt}'
+            prompt = write()
+            websocketOptions = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
+        else:
+            promptingOptions = None     #Ignore them if not generating a normal string.
 
         if isinstance(prompt, str):
             payload = self._generate_payload(prompt, generationOptions)
@@ -646,14 +635,14 @@ class ElevenLabsVoice:
         else:
             raise ValueError("Prompt is of unknown type.")
 
-        streamer:_DownloadStreamer = _DownloadStreamer(audioQueue)
-        mainThread = threading.Thread(target=streamer.begin_streaming, args=(responseConnection, generationOptions, websocketOptions, prompt))
+        streamer:_NumpyStreamer = _NumpyStreamer(responseConnection, generationOptions, websocketOptions, prompt, promptingOptions)
+        mainThread = threading.Thread(target=streamer.begin_streaming)
         mainThread.start()
 
         if isinstance(responseConnection, requests.Response):
-            return audioQueue, None
+            return streamer.destination_queue, None
         else:
-            return audioQueue, streamer.transcript_queue
+            return streamer.destination_queue, streamer.transcript_queue
 
     def get_preview_url(self) -> str|None:
         """
@@ -853,18 +842,136 @@ class BodgedSoundFile(sf.SoundFile):
         assert read_frames == frames, _ffi.buffer(cdata)    #Return read data as exception.args[0]
         return _ffi.buffer(cdata)
 
+    def read(self, frames=-1, dtype='float64', always_2d=False,
+             fill_value=None, out=None):
+
+        if out is None:
+            frames = self._check_frames(frames, fill_value)
+            out = self._create_empty_array(frames, always_2d, dtype)
+        else:
+            if frames < 0 or frames > len(out):
+                frames = len(out)
+        frames = self._array_io('read', out, frames)
+        if len(out) > frames:
+            if fill_value is None:
+                out = out[:frames]
+            else:
+                out[frames:] = fill_value
+        return out
+
+
 class _AudioStreamer:
-    def __init__(self):
+    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
         self._events = dict()
         self._current_audio_ms = 0
         self.transcript_queue = queue.Queue()   #Holds the transcripts for the audio data
+        self._enable_cutout = False
+        self._prompting_options = prompting_options
 
-    def _stream_downloader_function(self, streamedResponse: requests.Response):
+        self._start_frame = None
+        self._end_frame = None
+
+        if prompting_options is not None:   #Sanity check
+            if isinstance(prompt, Iterator) or not isinstance(prompt, SyncIterator):
+                self._enable_cutout = True
+                if prompting_options.pre_prompt == "":
+                    self._start_frame = 0
+
+        self._connection = streamConnection
+        self._generation_options = generation_options
+        self._sample_rate = int(generation_options.output_format.split("_")[1])
+        self._websocket_options = websocket_options
+        self._prompt = prompt
+
+    def _check_position(self, curr_frame) -> (bool, int, int):
+        start_delta = None
+        end_delta = None
+        if self._enable_cutout:
+            frame_bool = False
+            if self._start_frame is None:
+                frame_bool = False  # No start time yet
+            else:
+                start_delta = curr_frame - self._start_frame
+                if start_delta >= 0:
+                    frame_bool = True  # After start time
+                if self._end_frame is not None:  # If we have an end time
+                    end_delta = curr_frame - self._end_frame
+                    if end_delta >= 0:
+                        frame_bool = False  # We're past the end time
+        else:
+            frame_bool = True
+
+        check_info = {
+            "start_frame": self._start_frame,
+            "start_delta": start_delta,
+            "end_frame": self._end_frame,
+            "end_delta": end_delta,
+            "curr_frame":curr_frame,
+            "is_usable": frame_bool
+        }
+        logging.debug(check_info)
+
+        return frame_bool, start_delta, end_delta
+
+    def _cutout_data(self, curr_frame:int, data:Union[bytes, numpy.ndarray], framesize:int) -> (Union[bytes, numpy.ndarray], str):
+        """
+        Parameters:
+            curr_frame (int): The position (at the start of data!)
+            data (bytes|numpy.ndarray): The data to handle
+            framesize (int): The framesize.
+        Returns:
+            A tuple with the modified data and an indicator of the action taken (None,start,stop,zero)
+        """
+        if not self._enable_cutout:
+            return data, None
+
+        datalen = 0
+        if isinstance(data, bytes):
+            datalen = len(data) // framesize
+        elif isinstance(data, numpy.ndarray):
+            framesize = 1   #Override it since we're working with frames directly
+            if data.ndim == 1:
+                datalen = len(data)
+            elif data.ndim == 2:
+                datalen = data.shape[0]
+
+        #curr_frame -= datalen       #If we've read this chunk, then we're positioned _after_ it, so account for that.
+
+        frame_bool, start_delta, end_delta = self._check_position(curr_frame)
+
+        if start_delta is not None and start_delta < 0 and datalen > -start_delta:
+            data_to_keep = (datalen + start_delta) * framesize
+            if isinstance(data, bytes):
+                return b'\x00' * (len(data) - data_to_keep) + data[-data_to_keep:], "start"
+            else:  # numpy.ndarray
+                kept_data = data[-data_to_keep:]
+                empty_data = np.zeros_like(data)[:datalen - data_to_keep]
+                return np.concatenate((empty_data, kept_data)), "start"
+
+        elif end_delta is not None and end_delta < 0 and datalen > -end_delta:
+            data_to_keep = (datalen + end_delta) * framesize
+            if isinstance(data, bytes):
+                return data[:data_to_keep] + b'\x00' * (len(data) - data_to_keep), "stop"
+            else:  # numpy.ndarray
+                kept_data = data[:data_to_keep]
+                empty_data = np.zeros_like(data)[:len(data) - data_to_keep]
+                return np.concatenate((kept_data, empty_data)), "stop"
+        elif not frame_bool:
+            if isinstance(data, bytes):
+                data = b'\x00' * len(data)
+            else:
+                data = np.zeros_like(data)
+            return data, "zero"
+
+        return data, None
+
+    def _stream_downloader_function(self):
         # This is the function running in the download thread.
-        streamedResponse.raise_for_status()
+        self._connection.raise_for_status()
         totalLength = 0
         logging.debug("Starting iter...")
-        for chunk in streamedResponse.iter_content(chunk_size=_downloadChunkSize):
+        for chunk in self._connection.iter_content(chunk_size=_downloadChunkSize):
             self._stream_downloader_chunk_handler(chunk)
             totalLength += len(chunk)
 
@@ -872,20 +979,20 @@ class _AudioStreamer:
         self._events["downloadDoneEvent"].set()
         return
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions, websocket_options:WebsocketOptions):
+    def _stream_downloader_function_websockets(self):
         totalLength = 0
         logging.debug("Starting iter...")
 
         def sender():
-            for text_chunk in _text_chunker(text_iterator, generation_options):
-                sent_data = dict(text=text_chunk, try_trigger_generation=websocket_options.try_trigger_generation)
+            for text_chunk in _text_chunker(self._prompt, self._generation_options):
+                sent_data = dict(text=text_chunk, try_trigger_generation=self._websocket_options.try_trigger_generation)
                 try:
-                    websocket.send(json.dumps(sent_data))
+                    self._connection.send(json.dumps(sent_data))
                 except websockets.exceptions.ConnectionClosedError as e:
                     logging.exception(f"Generation failed, shutting down: {e}")
                     raise e
 
-            websocket.send(json.dumps(dict(text=""))) # Send end of stream
+            self._connection.send(json.dumps(dict(text=""))) # Send end of stream
 
         sender_thread = threading.Thread(target=sender)
         sender_thread.start()
@@ -893,29 +1000,37 @@ class _AudioStreamer:
         # Receive remaining audio after sender has finished
         while True:
             try:
-                data = json.loads(websocket.recv()) #We block because we know we're waiting on more messages.
+                data = json.loads(self._connection.recv()) #We block because we know we're waiting on more messages.
+
+                alignment_data = data.get("normalizedAlignment", None)
+
+                if alignment_data is not None:
+                    formatted_list = list()
+                    for i in range(len(alignment_data["chars"])):
+                        new_char = {
+                            "character": alignment_data["chars"][i],
+                            "start_time_ms": alignment_data["charStartTimesMs"][i] + self._current_audio_ms,
+                            "duration_ms": alignment_data["charDurationsMs"][i]
+                        }
+                        formatted_list.append(new_char)
+                        if self._enable_cutout:
+                            if new_char["character"] == '"':
+                                if self._start_frame is None:
+                                    self._start_frame = math.ceil((new_char["start_time_ms"] + new_char["duration_ms"] * (1 - self._prompting_options.open_quote_duration_multiplier)) * self._sample_rate / 1000)
+                                else:
+                                    self._end_frame = math.floor((new_char["start_time_ms"] + new_char["duration_ms"] * self._prompting_options.close_quote_duration_multiplier) * self._sample_rate / 1000)
+
+                    self._current_audio_ms = formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
+
+                    if self.transcript_queue is not None:
+                        self.transcript_queue.put(formatted_list)
+
                 audio_data = data.get("audio", None)
                 if audio_data:
                     chunk = base64.b64decode(data["audio"])
                     self._stream_downloader_chunk_handler(chunk)
                     totalLength += len(chunk)
 
-                alignment_data = data.get("normalizedAlignment", None)
-
-                if alignment_data is not None:
-                    #self._current_audio_ms = 0
-                    formatted_list = list()
-                    for i in range(len(alignment_data["chars"])):
-                        formatted_list.append({
-                            "character": alignment_data["chars"][i],
-                            "start_time_ms": alignment_data["charStartTimesMs"][i] + self._current_audio_ms,
-                            "duration_ms": alignment_data["charDurationsMs"][i]
-                        })
-
-                    self._current_audio_ms += formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
-
-                    if self.transcript_queue is not None:
-                        self.transcript_queue.put(formatted_list)
 
                 is_final = data.get("isFinal", False)
                 if is_final:
@@ -934,22 +1049,30 @@ class _AudioStreamer:
         pass
 
 class _DownloadStreamer(_AudioStreamer):
-    def __init__(self, audioQueue:queue.Queue):
-        super().__init__()
+    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._events: dict[str, threading.Event] = {
             "downloadDoneEvent": threading.Event()
         }
-        self.destination_queue = audioQueue
+        self.destination_queue = queue.Queue()
+        if "mp3" in generation_options.output_format.lower():
+            self._framesize = 4
+        else:
+            self._framesize = 2
+        self._audio_length = 0
 
-    def begin_streaming(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection], generation_options:GenerationOptions, websocket_options:WebsocketOptions, text: Union[str, Iterator[str]] = None):
+
+
+    def begin_streaming(self):
         for eventName, event in self._events.items():
             event.clear()
 
         logging.debug("Starting playback...")
-        if isinstance(streamConnection, requests.Response):
-            self._stream_downloader_function(streamConnection)
+        if isinstance(self._connection, requests.Response):
+            self._stream_downloader_function()
         else:
-            self._stream_downloader_function_websockets(streamConnection, text, generation_options, websocket_options)
+            self._stream_downloader_function_websockets()
         logging.debug("Stream done - putting None in the queue.")
         self.destination_queue.put(None)
         return
@@ -957,10 +1080,13 @@ class _DownloadStreamer(_AudioStreamer):
     def _stream_downloader_chunk_handler(self, chunk):
         self.destination_queue.put(chunk)
 
+
+#TODO (maybe): Refactor _Mp3Streamer and _RawStreamer to just use a _NumpyStreamer.
 class _Mp3Streamer(_AudioStreamer):
 
-    def __init__(self,playbackOptions:PlaybackOptions):
-        super().__init__()
+    def __init__(self, playbackOptions:PlaybackOptions, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._dtype= "float32"
         self._q = queue.Queue()
         self._bytesFile = io.BytesIO()
@@ -981,16 +1107,16 @@ class _Mp3Streamer(_AudioStreamer):
             "playbackStartFired": threading.Event()
         }
 
-    def _stream_downloader_function(self, streamedResponse: requests.Response):
-        super()._stream_downloader_function(streamedResponse)
+    def _stream_downloader_function(self):
+        super()._stream_downloader_function()
         self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
         return
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions, websocket_options:WebsocketOptions):
-        super()._stream_downloader_function_websockets(websocket, text_iterator, generation_options, websocket_options)
+    def _stream_downloader_function_websockets(self):
+        super()._stream_downloader_function_websockets()
         self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
 
-    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, generation_options:GenerationOptions, websocket_options:WebsocketOptions, text:Union[str,Iterator[str]]=None):
+    def begin_streaming(self, future:concurrent.futures.Future):
         # Clean all the buffers and reset all events.
         # Note: text and custom_pronunciations are unused if it's not doing input_streaming - I just pass them anyway out of convenience.
         self._q = queue.Queue()
@@ -999,10 +1125,10 @@ class _Mp3Streamer(_AudioStreamer):
         for eventName, event in self._events.items():
             event.clear()
 
-        if isinstance(streamConnection, requests.Response):
-            downloadThread = threading.Thread(target=self._stream_downloader_function, args=(streamConnection,))
+        if isinstance(self._connection, requests.Response):
+            downloadThread = threading.Thread(target=self._stream_downloader_function)
         else:
-            downloadThread = threading.Thread(target=self._stream_downloader_function_websockets, args=(streamConnection, text, generation_options, websocket_options))
+            downloadThread = threading.Thread(target=self._stream_downloader_function_websockets)
         downloadThread.start()
 
         while True:
@@ -1014,6 +1140,7 @@ class _Mp3Streamer(_AudioStreamer):
                     self._bytesSoundFile = BodgedSoundFile(self._bytesFile)
                     logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
                     self._frameSize = self._bytesSoundFile.channels * sf._ffi.sizeof(self._bytesSoundFile._check_dtype(self._dtype))
+
                     self._events["soundFileReadyEvent"].set()
                     break
             except sf.LibsndfileError:
@@ -1028,12 +1155,29 @@ class _Mp3Streamer(_AudioStreamer):
             samplerate=self._bytesSoundFile.samplerate, blocksize=_playbackBlockSize,
             device=self._deviceID, channels=self._bytesSoundFile.channels, dtype=self._dtype,
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
+
         future.set_result(stream)
         logging.debug("Starting playback...")
         with stream:
+
             while True:
                 try:
                     data = self._get_data_from_download_thread()
+                    #if self._start_frame is not None:
+
+                    with self._bytesLock:
+                        original_data_length = len(data)
+                        cur_pos = self._bytesSoundFile.tell()-original_data_length//self._frameSize
+                        data, action_taken = self._cutout_data(cur_pos, data, self._frameSize)
+                        if action_taken is not None:
+                            silence_chunk = b'\x00' * original_data_length
+                            if action_taken == "start":
+                                self._q.put(silence_chunk)
+                            if action_taken == "stop":
+                                self._q.put(data)
+                                for _ in range(2):
+                                    self._q.put(silence_chunk)
+                                data = silence_chunk
                 except RuntimeError as e:
                     logging.debug("File was looping at the end. Exiting.")
                     self._q.put(e)
@@ -1051,10 +1195,12 @@ class _Mp3Streamer(_AudioStreamer):
                         self._bytesFile.seek(curPos)
                         if endPos == curPos and self._events["downloadDoneEvent"].is_set():
                             logging.debug("We're at the end.")
-                            if data != b"":
+                            if len(data) > 0:
                                 logging.debug("Still some data left, writing it...")
                                 #logging.debug("Putting " + str(len(data)) +
                                 #              " bytes in queue.")
+                                curr_frame = curPos - len(data)//self._frameSize
+                                data, action = self._cutout_data(curr_frame, data, self._frameSize)
                                 self._q.put(data)
                             break
                         else:
@@ -1110,11 +1256,13 @@ class _Mp3Streamer(_AudioStreamer):
                 if isinstance(readData, RuntimeError):
                     logging.warning("File was looping. Stopping.")
                     raise sd.CallbackStop
+                else:
+                    if isinstance(readData, numpy.ndarray):
+                        readData = readData.reshape(-1, self._bytesSoundFile.channels)
 
-                if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
-                    logging.warning("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
-                    continue
-
+                    if len(readData) == 0 and not self._events["downloadDoneEvent"].is_set():
+                        logging.warning("An empty item got into the queue. This shouldn't happen, but let's just skip it.")
+                        continue
                 break
             except queue.Empty as e:
                 if self._events["downloadDoneEvent"].is_set():
@@ -1137,7 +1285,11 @@ class _Mp3Streamer(_AudioStreamer):
             logging.debug(f"Read {len(readData)} bytes but expected {len(outdata)}, padding...")
 
             outdata[:len(readData)] = readData
-            outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
+            if isinstance(outdata, numpy.ndarray):
+                outdata[len(readData):].fill(0)
+            else:
+                outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
+
         elif len(readData) == 0:
             logging.debug("Callback got no data from the queue. Checking if playback is over...")
             with self._bytesLock:
@@ -1148,7 +1300,10 @@ class _Mp3Streamer(_AudioStreamer):
                     raise sd.CallbackStop
                 else:
                     logging.error("...Read no data but the download isn't over? Panic. Just send silence.")
-                    outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
+                    if isinstance(outdata, numpy.ndarray):
+                        outdata[len(readData):].fill(0)
+                    else:
+                        outdata[len(readData):] = b'\x00' * (len(outdata) - len(readData))
         else:
             outdata[:] = readData
 
@@ -1205,7 +1360,7 @@ class _Mp3Streamer(_AudioStreamer):
         preReadBytesPos = self._bytesFile.tell()
 
         try:
-            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)    #Try to read the data
+            readData = self._bytesSoundFile.buffer_read(dataToRead, dtype=dtype)
         except (AssertionError, soundfile.LibsndfileError):
             #The bug happened, so we must be at a point in the file where the reading fails.
             readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
@@ -1264,16 +1419,21 @@ class _Mp3Streamer(_AudioStreamer):
         return readData
 
 class _RAWStreamer(_AudioStreamer):
-    def __init__(self,playbackOptions:PlaybackOptions, subtype:str, samplerate:int):
-        super().__init__()
+    def __init__(self, playbackOptions:PlaybackOptions, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._q = queue.Queue()
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
         self._dtype = "int16"
-        self._subtype = subtype
-        self._samplerate = samplerate
+
+        parts = generation_options.output_format.lower().split("_")
+        self._subtype = parts[0]
+        self._sample_rate = int(parts[1])
+
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
         self._channels = 1
+        self._frameSize = 2
         self._events: dict[str, threading.Event] = {
             "playbackFinishedEvent": threading.Event(),
             "downloadDoneEvent": threading.Event(),
@@ -1281,16 +1441,17 @@ class _RAWStreamer(_AudioStreamer):
             "blockDataAvailable": threading.Event()
         }
         self._buffer = b""
+        self._audio_length = 0
 
-    def _stream_downloader_function(self, streamedResponse:requests.Response):
-        super()._stream_downloader_function(streamedResponse)
+    def _stream_downloader_function(self):
+        super()._stream_downloader_function()
         self._stream_downloader_chunk_handler(b"")
 
-    def _stream_downloader_function_websockets(self, websocket: websockets.sync.client.ClientConnection, text_iterator: Iterator[str], generation_options:GenerationOptions, websocket_options:WebsocketOptions):
-        super()._stream_downloader_function_websockets(websocket, text_iterator, generation_options, websocket_options)
+    def _stream_downloader_function_websockets(self):
+        super()._stream_downloader_function_websockets()
         self._stream_downloader_chunk_handler(b"")
 
-    def begin_streaming(self, streamConnection:Union[requests.Response, websockets.sync.client.ClientConnection], future:concurrent.futures.Future, generation_options:GenerationOptions, websocket_options:WebsocketOptions,text:Union[str,Iterator[str]]=None):
+    def begin_streaming(self, future:concurrent.futures.Future):
         # Clean all the buffers and reset all events.
         # Note: text is unused if it's not doing input_streaming - I just pass it anyway out of convenience.
         self._q = queue.Queue()
@@ -1299,16 +1460,16 @@ class _RAWStreamer(_AudioStreamer):
             event.clear()
 
         stream = sd.OutputStream(
-            samplerate=self._samplerate, blocksize=_playbackBlockSize,
+            samplerate=self._sample_rate, blocksize=_playbackBlockSize,
             device=self._deviceID, channels=self._channels, dtype=self._dtype,
             callback=self._stream_playback_callback, finished_callback=self._events["playbackFinishedEvent"].set)
         future.set_result(stream)
         logging.debug("Starting playback...")
         with stream:
-            if isinstance(streamConnection, requests.Response):
-                self._stream_downloader_function(streamConnection)
+            if isinstance(self._connection, requests.Response):
+                self._stream_downloader_function()
             else:
-                self._stream_downloader_function_websockets(streamConnection, text, generation_options, websocket_options)
+                self._stream_downloader_function_websockets()
 
             self._events["playbackFinishedEvent"].wait()  # Wait until playback is finished
             self._onPlaybackEnd()
@@ -1320,19 +1481,24 @@ class _RAWStreamer(_AudioStreamer):
         #Split the code for easier handling
 
         if self._subtype.lower() == "ulaw":
-            self._buffer += audioop.ulaw2lin(chunk, 2)
-        else:
-            self._buffer += chunk
+            chunk = audioop.ulaw2lin(chunk, 2)
+        self._buffer += chunk
+        self._audio_length += len(chunk)
 
-        while len(self._buffer) >= _playbackBlockSize*2:    #*2 due to the audio frame size
-            frame_data, self._buffer = self._buffer[:_playbackBlockSize*2], self._buffer[_playbackBlockSize*2:]
+        while len(self._buffer) >= _playbackBlockSize*self._frameSize:
+            curr_pos = (self._audio_length-len(self._buffer)) // self._frameSize
+            frame_data, self._buffer = self._buffer[:_playbackBlockSize*self._frameSize], self._buffer[_playbackBlockSize*self._frameSize:]
+            frame_data, action_taken = self._cutout_data(curr_pos, frame_data, self._frameSize)
             audioData = numpy.frombuffer(frame_data, dtype=self._dtype)
-            self._q.put(audioData.reshape(-1, self._channels))
+            audioData = audioData.reshape(-1, self._channels)
+
+            self._q.put(audioData)
 
         if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
             audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
+            curr_pos = (self._audio_length - len(self._buffer)) // self._frameSize
+            audioData, action_taken = self._cutout_data(curr_pos, audioData, self._frameSize)
             self._q.put(audioData.reshape(-1, self._channels))
-
             # Pad the end of the audio with silence to avoid the looping final chunk.s
             silence_chunk = np.zeros(_playbackBlockSize * self._channels, dtype=self._dtype).reshape(-1, self._channels)
             for _ in range(2):
@@ -1379,3 +1545,305 @@ class _RAWStreamer(_AudioStreamer):
             logging.warning("Callback got empty data from the queue.")
         else:
             outdata[:] = readData
+
+
+#Is this a ton of duplicate code? Yes.
+#Do I want to spend god knows how many hours finagling this finnicky mp3 streaming code to unify it? No.
+class _NumpyStreamer(_AudioStreamer):
+    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
+
+        parts = generation_options.output_format.lower().split("_")
+        self._subtype = parts[0]
+
+        self._events: dict[str, threading.Event] = {
+            "headerReadyEvent": threading.Event(),
+            "soundFileReadyEvent": threading.Event(),
+            "downloadDoneEvent": threading.Event(),
+            "blockDataAvailable": threading.Event()
+        }
+
+        self.destination_queue = queue.Queue()
+        if "mp3" in generation_options.output_format.lower():
+            self._audio_type = "mp3"
+            self._frameSize = 4
+            self._dtype = "float32"
+        else:
+            self._audio_type = "raw"
+            self._frameSize = 2
+            self._dtype = "int16"
+
+        self._channels = 1
+        self._buffer = b""
+        self._audio_length = 0
+
+        self._bytesFile = io.BytesIO()
+        self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
+        self._bytesLock = threading.Lock()
+
+    def _stream_downloader_function(self):
+        super()._stream_downloader_function()
+        self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
+        return
+
+    def _stream_downloader_function_websockets(self):
+        super()._stream_downloader_function_websockets()
+        self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
+
+
+    def _assertionerror_workaround(self, dataToRead:int=-1, dtype=None, preReadFramePos=-1, preReadBytesPos=-1) -> bytes:
+        # The bug happened, so we must be at a point in the file where the reading fails.
+
+        logging.debug("The following is some logging for a new and fun soundfile bug, which I (poorly) worked around. Lovely.")
+        logging.debug(f"Before the bug: frame {preReadFramePos} (byte {preReadBytesPos})")
+        logging.debug(f"After the bug: frame {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()})")
+
+        # Release the lock on the underlying BytesIO to allow the download thread to download a bit more of the file.
+        self._bytesLock.release()
+        if not self._events["downloadDoneEvent"].is_set():
+            # Wait for the next block to be downloaded.
+            logging.debug("Fun bug happened before the download was over. Waiting for blockDataAvailable.")
+            self._events["blockDataAvailable"].clear()
+            self._events["blockDataAvailable"].wait()
+        else:
+            # Wait.
+            logging.debug("Fun bug happened AFTER the download was over. Continue.")
+
+
+        self._bytesLock.acquire()
+
+        # Let's seek back and re-create the SoundFile, so that we're sure it's fully synched up.
+        self._bytesFile.seek(0)
+        newSF = BodgedSoundFile(self._bytesFile, mode="r")
+        newSF.seek(preReadFramePos)
+        del self._bytesSoundFile
+        self._bytesSoundFile = newSF
+        new_bytes_pos = self._bytesFile.tell()
+        logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
+        if self.last_recreated_pos == new_bytes_pos and self._events["downloadDoneEvent"].is_set():
+            #If the bug happens twice, at the same spot, once hte file is fully downloaded, just assume it's broken.
+            raise RuntimeError("File is looping at the end.")
+        else:
+            self.last_recreated_pos = new_bytes_pos
+        # Try reading the data again. If it works, good.
+        try:
+            readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
+        except (AssertionError, soundfile.LibsndfileError) as ea:
+            # If it fails, get the partial data from the exception args.
+            readData = ea.args[0]
+        return readData
+
+    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=None):
+        if dtype is None:
+            dtype = self._dtype
+        preReadFramePos = self._bytesSoundFile.tell()
+        preReadBytesPos = self._bytesFile.tell()
+
+        try:
+            readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
+        except (AssertionError, soundfile.LibsndfileError):
+            #The bug happened, so we must be at a point in the file where the reading fails.
+            readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
+
+
+        #This is the handling for the bug that's described in the rest of the issue. Irrelevant to this new one.
+        if dataToRead != len(readData):
+            logging.debug(f"Expected {dataToRead} bytes, but got back {len(readData)}")
+        if len(readData) < dataToRead:
+            logging.debug("Insufficient data read.")
+            curPos = self._bytesFile.tell()
+            endPos = self._bytesFile.seek(0, os.SEEK_END)
+            if curPos != endPos:
+                logging.debug("We're not at the end of the file. Check if we're out of frames.")
+                logging.debug("Recreating soundfile...")
+                self._bytesFile.seek(0)
+                newSF = BodgedSoundFile(self._bytesFile, mode="r")
+                newSF.seek(self._bytesSoundFile.tell() - int(len(readData)))
+                if newSF.frames > self._bytesSoundFile.frames:
+                    logging.debug("Frame counter was outdated.")
+                    del self._bytesSoundFile
+                    self._bytesSoundFile = newSF
+
+                    preReadFramePos = self._bytesSoundFile.tell()
+                    preReadBytesPos = self._bytesFile.tell()
+
+                    try:
+                        readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
+                    except (AssertionError, soundfile.LibsndfileError):
+                        readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
+                    logging.debug("Now read " + str(len(readData)) +
+                          " bytes. I sure hope that number isn't zero.")
+                else:
+                    del newSF
+        return readData
+
+
+    def _get_data_from_download_thread(self) -> bytes:
+        self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
+        self._bytesLock.acquire()
+        readData = self._soundFile_read_and_fix(_playbackBlockSize)
+
+        currentPos = self._bytesFile.tell()
+        self._bytesFile.seek(0, os.SEEK_END)
+        endPos = self._bytesFile.tell()
+        #logging.debug("Remaining file length: " + str(endPos - currentPos) + "\n")
+        self._bytesFile.seek(currentPos)
+        remainingBytes = endPos - currentPos
+
+        if remainingBytes < _playbackBlockSize and not self._events["downloadDoneEvent"].is_set():
+            logging.debug("Marking no available blocks...")
+            self._events["blockDataAvailable"].clear()  # Download isn't over and we've consumed enough data to where there isn't another block available.
+
+        logging.debug("Read bytes: " + str(len(readData)) + "\n")
+
+        self._bytesLock.release()
+        return readData
+
+    def begin_streaming(self):
+        if self._audio_type == "raw":
+            for eventName, event in self._events.items():
+                event.clear()
+
+            if isinstance(self._connection, requests.Response):
+                self._stream_downloader_function()
+            else:
+                self._stream_downloader_function_websockets()
+            logging.debug("Stream done - putting None in the queue.")
+            self.destination_queue.put(None)
+        else:
+            self._bytesFile = io.BytesIO()
+            self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
+            for eventName, event in self._events.items():
+                event.clear()
+
+            if isinstance(self._connection, requests.Response):
+                downloadThread = threading.Thread(target=self._stream_downloader_function)
+            else:
+                downloadThread = threading.Thread(target=self._stream_downloader_function_websockets)
+            downloadThread.start()
+
+            while True:
+                logging.debug("Waiting for header event...")
+                self._events["headerReadyEvent"].wait()
+                logging.debug("Header maybe ready?")
+                try:
+                    with self._bytesLock:
+                        self._bytesSoundFile = BodgedSoundFile(self._bytesFile)
+                        logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
+                        self._events["soundFileReadyEvent"].set()
+                        break
+                except sf.LibsndfileError:
+                    self._bytesFile.seek(0)
+                    dataBytes = self._bytesFile.read()
+                    self._bytesFile.seek(0)
+                    logging.debug("Error creating the soundfile with " + str(len(dataBytes)) + " bytes of data. Let's clear the headerReady event.")
+                    self._events["headerReadyEvent"].clear()
+                    self._events["soundFileReadyEvent"].set()
+
+            while True:
+                try:
+                    data = self._get_data_from_download_thread()
+                    # if self._start_frame is not None:
+
+                    with self._bytesLock:
+                        original_data_length = len(data)
+                        cur_pos = self._bytesSoundFile.tell() - original_data_length
+                        data, action_taken = self._cutout_data(cur_pos, data, self._frameSize)
+                except RuntimeError as e:
+                    logging.debug("File was looping at the end. Exiting.")
+                    break
+
+                if len(data) == _playbackBlockSize:
+                    logging.debug("Putting " + str(len(data)) + " bytes in queue.")
+                    self.destination_queue.put(data)
+                else:
+                    logging.debug("Got back less data than expected, check if we're at the end...")
+                    with self._bytesLock:
+                        # This needs to use bytes rather than frames left, as sometimes the number of frames left is wrong.
+                        curPos = self._bytesFile.tell()
+                        endPos = self._bytesFile.seek(0, os.SEEK_END)
+                        self._bytesFile.seek(curPos)
+                        if endPos == curPos and self._events["downloadDoneEvent"].is_set():
+                            logging.debug("We're at the end.")
+                            if len(data) > 0:
+                                logging.debug("Still some data left, writing it...")
+                                # logging.debug("Putting " + str(len(data)) +
+                                #              " bytes in queue.")
+                                curr_frame = curPos - len(data)
+                                data, action = self._cutout_data(curr_frame, data, self._frameSize)
+                                self.destination_queue.put(data)
+                            break
+                        else:
+                            logging.debug("We're not at the end, yet we recieved less data than expected. This is a bug that was introduced with the update.")
+            logging.debug("While loop done.")
+            self.destination_queue.put(None)
+        return
+
+    def _stream_downloader_chunk_handler(self, chunk):
+        if self._audio_type == "raw":
+            if self._subtype.lower() == "ulaw":
+                chunk = audioop.ulaw2lin(chunk, 2)
+            self._buffer += chunk
+            self._audio_length += len(chunk)
+
+            while len(self._buffer) >= _playbackBlockSize*self._frameSize:
+                curr_pos = (self._audio_length-len(self._buffer)) // self._frameSize
+                frame_data, self._buffer = self._buffer[:_playbackBlockSize*self._frameSize], self._buffer[_playbackBlockSize*self._frameSize:]
+                frame_data, action_taken = self._cutout_data(curr_pos, frame_data, self._frameSize)
+                audioData = numpy.frombuffer(frame_data, dtype=self._dtype)
+                audioData = audioData.reshape(-1, self._channels)
+                audioData = audioData.astype(np.float32)
+                audioData /= np.iinfo(np.int16).max
+                if action_taken is None or action_taken != "zero":
+                    self.destination_queue.put(audioData)
+                if action_taken is not None and action_taken == "stop":
+                    self.destination_queue.put(None)
+
+            if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
+                audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
+                curr_pos = (self._audio_length - len(self._buffer)) // self._frameSize
+                audioData, action_taken = self._cutout_data(curr_pos, audioData, self._frameSize)
+                audioData = audioData.reshape(-1, self._channels)
+                # Normalize to float32
+                audioData = audioData.astype(np.float32)
+                audioData /= np.iinfo(np.int16).max
+                if action_taken is None or action_taken != "zero":
+                    self.destination_queue.put(audioData)
+                # Pad the end of the audio with silence to avoid the looping final chunk.s
+                silence_chunk = np.zeros(_playbackBlockSize * self._channels, dtype=self._dtype).reshape(-1, self._channels)
+                silence_chunk = silence_chunk.astype(np.float32)
+                silence_chunk /= np.iinfo(np.int16).max
+                for _ in range(2):
+                    self.destination_queue.put(silence_chunk)
+                self.destination_queue.put(None)
+        else:
+            if self._events["headerReadyEvent"].is_set() and not self._events["soundFileReadyEvent"].is_set():
+                logging.debug("HeaderReady is set, but waiting for the soundfile...")
+                self._events["soundFileReadyEvent"].wait()  # Wait for the soundfile to be created.
+                if not self._events["headerReadyEvent"].is_set():
+                    logging.debug("headerReady was cleared by the playback thread. Header data still missing, download more.")
+                    self._events["soundFileReadyEvent"].clear()
+
+            if len(chunk) != _downloadChunkSize:
+                logging.debug("Writing weirdly sized chunk (" + str(len(chunk)) + ")...")
+
+            # Write the new data then seek back to the initial position.
+            with self._bytesLock:
+                if not self._events["headerReadyEvent"].is_set():
+                    logging.debug("headerReady not set, setting it...")
+                    self._bytesFile.seek(0, os.SEEK_END)  # MAKE SURE the head is at the end.
+                    self._bytesFile.write(chunk)
+                    self._bytesFile.seek(0)  # Move the head back.
+                    self._events["headerReadyEvent"].set()  # We've never downloaded a single chunk before. Do that and move the head back, then fire the event.
+                else:
+                    lastReadPos = self._bytesFile.tell()
+                    lastWritePos = self._bytesFile.seek(0, os.SEEK_END)
+                    self._bytesFile.write(chunk)
+                    endPos = self._bytesFile.tell()
+                    self._bytesFile.seek(lastReadPos)
+                    logging.debug("Write head move: " + str(endPos - lastWritePos))
+                    if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
+                        logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
+                        self._events["blockDataAvailable"].set()
+
