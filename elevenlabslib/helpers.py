@@ -235,6 +235,7 @@ class WebsocketOptions:
 class PromptingOptions:
     """
     This class holds the options for pre/post-prompting the audio, to add emotion.
+
     Parameters:
         pre_prompt (str, optional): Prompt which will be place before the quoted text.
         post_prompt (str, optional): Prompt which will be placed after the quoted text.
