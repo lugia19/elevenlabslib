@@ -642,24 +642,25 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
         response.raise_for_status() #Just in case the callable isn't a function that already does this.
     except requests.exceptions.RequestException as e:
         response_json = e.response.json()
-        logging.error(response_json)
+        response_handled = False
+
         if "detail" in response_json:
             error_detail = response_json["detail"]
             if "status" in error_detail:
-                if error_detail["status"] == "too_many_concurrent_requests":
-                    logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
+                if error_detail["status"] == "too_many_concurrent_requests" or error_detail["status"] == "system_busy":
+                    if error_detail["status"] == "too_many_concurrent_requests":
+                        logging.warning(f"{generationID} - broke concurrency limits, handling the cooldown...")
+                    else:
+                        logging.warning(f"{generationID} - system overloaded, handling the cooldown...")
                     # Insert this in the user's "waiting to be generated" queue.
                     generationQueue.put(generationID)
                     response = None
+                    response_handled = True
                 elif error_detail["status"] == "model_can_not_do_voice_conversion":
                     raise RuntimeError(error_detail["message"])
-                else:
-                    raise e
-            else:
-                raise e
-        else:
+        if not response_handled:
+            logging.error(response_json)
             raise e
-
     if response is None:
         while True:
             try:
@@ -674,7 +675,8 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
                     logging.debug(f"\nOther items are first in queue, waiting for 0.5s\n")
                     time.sleep(0.5)  # The time to peek at the queue is constant.
             except requests.exceptions.RequestException as e:
-                if e.response.json()["detail"]["status"] == "too_many_concurrent_requests":
+                error_status = e.response.json()["detail"]["status"]
+                if error_status == "too_many_concurrent_requests" or error_status == "system_busy":
                     logging.debug(f"\nWaiting for {0.5 * waitMultiplier}s\n")
                     time.sleep(0.5 * waitMultiplier)  # Just wait a moment and try again.
                     waitMultiplier += 1
