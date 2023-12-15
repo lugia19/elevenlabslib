@@ -3,8 +3,10 @@ import io
 import queue
 import zipfile
 
-from typing import TYPE_CHECKING, BinaryIO, Union
+from typing import TYPE_CHECKING, BinaryIO, Union, List, Tuple, Any
 from warnings import warn
+
+from fuzzywuzzy import process
 
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
 from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice, ElevenLabsProfessionalVoice
@@ -212,7 +214,13 @@ class ElevenLabsUser:
         voiceData = response.json()
         from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
         return ElevenLabsVoice.voiceFactory(voiceData, self)
+
     def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
+        warn("This function is deprecated. Please use get_voices_by_name_v2() instead, which uses fuzzy matching.", DeprecationWarning)
+        matches = self.get_voices_by_name_v2(voiceName, score_threshold=100)
+        return matches
+
+    def get_voices_by_name_v2(self, voiceName: str, score_threshold:int=75) -> list[ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
         """
         Gets a list of voices with the given name.
 
@@ -221,19 +229,26 @@ class ElevenLabsUser:
 
         Args:
             voiceName (str): The name of the voices to get.
+            score_threshold (int, Optional): The % chance of a voice being a match required for it to be included in the returned list. Defaults to 75%.
 
         Returns:
             list[ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice]: A list of matching voices.
         """
         response = _api_get("/voices", headers=self._headers)
         voicesData = response.json()
-        matchingVoices = list()
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
-        for voiceData in voicesData["voices"]:
-            if voiceData["name"] == voiceName:
-                matchingVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
 
-        return matchingVoices
+        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        list_of_voices = voicesData["voices"]
+        all_matches = process.extract({"name":voiceName}, list_of_voices, limit=None, processor=lambda x: x.get("name"))
+
+        # Filter matches to include only those above the score threshold
+        filtered_matches = [match for match in all_matches if match[1] >= score_threshold]
+        matching_voices = list()
+        for voiceData, score in filtered_matches:
+            print(voiceData["name"])
+            print(score)
+            matching_voices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
+        return matching_voices
 
     def get_history_items(self) -> list[ElevenLabsHistoryItem]:
         warn("This function is deprecated. Please use get_history_items_paginated() instead, which uses pagination.", DeprecationWarning)

@@ -7,7 +7,7 @@ from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
+premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 
 #Generate the audio and get the bytes and historyID. 
 #The GenerationOptions specified here only apply for this generation.
@@ -80,7 +80,7 @@ from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
+premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 
 #pcm_highest (and mp3_highest) will automatically select the highest quality available to your account.
 audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_highest"))
@@ -153,7 +153,7 @@ from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
+premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 
 # Generate and play the audio using the English v2 model.
 playbackOptions = PlaybackOptions(runInBackground=False)
@@ -170,7 +170,7 @@ from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-voice = user.get_voices_by_name("Rachel")[0]
+voice = user.get_voices_by_name_v2("Rachel")[0]
 usingStreaming = True
 if usingStreaming:
     #The stream function uses a future rather than returing the audioStream directly.
@@ -194,7 +194,7 @@ import random
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-voice = user.get_voices_by_name("Rachel")[0]
+voice = user.get_voices_by_name_v2("Rachel")[0]
 
 #Get all available output devices
 outputDevices = [device for device in sounddevice.query_devices() if device["max_output_channels"] > 0]
@@ -230,7 +230,7 @@ from elevenlabslib import *
 
 api_key = "api_key"
 user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name("Rachel")[0]
+premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 
 #Find a multilingual model (one that supports a language other than english).
 #We can't just check if it supports more than 1 language as english is split into 4 different types.
@@ -256,7 +256,7 @@ newVoiceName = "newVoice"
 user = ElevenLabsUser(api_key)
 
 try:
-    existingVoice = user.get_voices_by_name(newVoiceName)[0]
+    existingVoice = user.get_voices_by_name_v2(newVoiceName)[0]
 except IndexError:
     print("Voice doesn't exist, let's create it")
     if not user.get_voice_clone_available():
@@ -310,7 +310,7 @@ api_key = "api_key"
 user = ElevenLabsUser(api_key)
 
 #Generate two items to be deleted later
-premadeVoice = user.get_voices_by_name("Rachel")[0]
+premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 premadeVoice.generate_audio_v2("Test.")
 premadeVoice.generate_audio_v2("Test.")
 
