@@ -245,8 +245,6 @@ class ElevenLabsUser:
         filtered_matches = [match for match in all_matches if match[1] >= score_threshold]
         matching_voices = list()
         for voiceData, score in filtered_matches:
-            print(voiceData["name"])
-            print(score)
             matching_voices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
         return matching_voices
 
