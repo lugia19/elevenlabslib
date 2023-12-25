@@ -95,13 +95,19 @@ user = ElevenLabsUser(api_key)
 voice = user.get_available_voices()[0]
 
 #The synthesizer will manage streaming all the audio and playing it back in order.
-synthesizer = Synthesizer()     
+#The onPlaybackStart and onPlaybackEnd parameters set here will be run for every audio.
+playbackOptions = PlaybackOptions(onPlaybackStart=lambda: print("Playback Start"), onPlaybackEnd= lambda:print("Playback End"))
+synthesizer = Synthesizer(defaultPlaybackOptions=playbackOptions)
 synthesizer.start()
 for i in range(10):
     print(f"Loop {i}")
-    synthesizer.add_to_queue(voice, f"This is test {i}.")
-
-input("We're past the for loop already. Hit enter when you'd like to stop the playback.")
+    if i != 6:
+        synthesizer.add_to_queue(voice, f"This is test {i}.")
+    else:
+        #You can override both GenerationOptions and PlaybackOptions on any generation
+        synthesizer.add_to_queue(voice, f"This is test {i}.", GenerationOptions(stability=0), PlaybackOptions(onPlaybackStart=lambda: print("Stability 0 Start"), onPlaybackEnd= lambda:print("Stability 0 End")))
+        
+input("We're past the for loop already. Hit enter when you'd like to stop the playback.\n")
 synthesizer.abort()
 
 ```

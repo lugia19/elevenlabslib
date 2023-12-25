@@ -222,9 +222,11 @@ class WebsocketOptions:
     Parameters:
         chunk_length_schedule (list[int], optional): Chunking schedule for generation. If you pass [50, 120, 500], the first audio chunk will be generated after recieving 50 characters, the second after 120 more (so 170 total), and the third onwards after 500. Defaults to [50], so always generating ASAP.
         try_trigger_generation (bool, optional): Whether to try and generate the first chunk of audio at >50 characters, regardless of the chunk_length_schedule. Defaults to true.
+        enable_ssml_parsing (bool, optional): Whether to enable parsing of SSML tags, such as breaks or pronunciations. Increases latency. Defaults to False.
     """
     try_trigger_generation: bool = True
     chunk_length_schedule: List[int] = dataclasses.field(default_factory=lambda: [50])
+    enable_ssml_parsing: bool = False
 
     def __post_init__(self):
         for value in self.chunk_length_schedule:
@@ -271,26 +273,32 @@ class Synthesizer:
 
     They will all be downloaded together, and will play back in the same order you put them in. I've found this gives the lowest possible latency.
     """
-    def __init__(self, portAudioDeviceID:Optional[int] = None):
+    def __init__(self, defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True), defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3)):
         """
         Initializes the Synthesizer instance.
         Parameters:
-            portAudioDeviceID: The device where you'd like the audio to be played back. Defaults to the default playback device.
+            defaultPlaybackOptions (PlaybackOptions, optional): The default playback options (for the onPlayback callbacks), that will be used if none are specified when calling add_to_queue
+            defaultGenerationOptions (GenerationOptions, optional): The default generation options, that will be used if none are specified when calling add_to_queue
         """
+
         self._eventStreamQueue = queue.Queue()
         self._readyForPlaybackEvent = threading.Event()
         self._readyForPlaybackEvent.set()
-        self._outputDeviceIndex = portAudioDeviceID
         self._ttsQueue = queue.Queue()
         self._interruptEvent = threading.Event()
         self._currentStream: sd.OutputStream = None
+        self._defaultGenOptions = defaultGenerationOptions
+        if isinstance(defaultPlaybackOptions, int):
+            logging.warning("Synthesizer no longer takes portAudioDeviceID as a parameter, please use defaultPlaybackOptions from now on. Wrapping it...")
+            defaultPlaybackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=defaultPlaybackOptions)
+        self._defaultPlayOptions = defaultPlaybackOptions
 
     def start(self):
         """
         Begins processing the queued audio.
         """
         if self._interruptEvent.is_set():
-            raise ValueError("Please do not re-use a Synthesizer instance. Create a new one instead.")
+            raise ValueError("Please do not re-use a stopped Synthesizer instance. Create a new one instead.")
 
         threading.Thread(target=self._ordering_thread).start() # Starts the thread that handles playback ordering.
         threading.Thread(target=self._consumer_thread).start() # Starts the consumer thread
@@ -312,16 +320,38 @@ class Synthesizer:
         """
         Allows you to change the current output device.
         """
-        self._outputDeviceIndex = portAudioDeviceID
+        warn("This is deprecated, use change_default_settings to change it through the defaultPlaybackOptions instead.", DeprecationWarning)
+        self._defaultPlayOptions.portaudioDeviceID = portAudioDeviceID
 
-    def add_to_queue(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=4)) -> None:
-        self._ttsQueue.put((voice, prompt, generationOptions))
+    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None):
+        """
+        Allows you to change the default settings.
+        """
+        if defaultGenerationOptions is not None:
+            self._defaultGenOptions = defaultGenerationOptions
+        if defaultPlaybackOptions is not None:
+            self._defaultPlayOptions = defaultPlaybackOptions
+
+    def add_to_queue(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None) -> None:
+        """
+        Adds an item to the synthesizer queue.
+        Parameters:
+            voice (ElevenLabsVoice): The voice that will speak the prompt
+            prompt (str): The prompt to be spoken
+            generationOptions (GenerationOptions, optional): Overrides the generation options for this generation
+            playbackOptions (PlaybackOptions, optional): Overrides the playback options for this generation
+        """
+        if generationOptions is None:
+            generationOptions = self._defaultGenOptions
+        if playbackOptions is None:
+            playbackOptions = self._defaultPlayOptions
+        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions))
 
     def _consumer_thread(self):
-        voice, prompt, genOptions = None, None, None
+        voice, prompt, genOptions, playOptions = None, None, None, None
         while True:
             try:
-                voice, prompt, genOptions = self._ttsQueue.get(timeout=10)
+                voice, prompt, genOptions, playOptions = self._ttsQueue.get(timeout=10)
             except queue.Empty:
                 continue
             finally:
@@ -330,19 +360,21 @@ class Synthesizer:
                     return
 
             logging.debug(f"Synthesizing prompt: {prompt}")
-            self._generate_events(voice, prompt, genOptions)
+            self._generate_events(voice, prompt, genOptions, playOptions)
 
-    def _generate_events(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions):
+    def _generate_events(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions):
         newEvent = threading.Event()
 
         def startcallbackfunc():
             newEvent.wait()
+            playbackOptions.onPlaybackStart()
         def endcallbackfunc():
+            playbackOptions.onPlaybackEnd()
             self._readyForPlaybackEvent.set()
 
-        playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=self._outputDeviceIndex, onPlaybackStart=startcallbackfunc, onPlaybackEnd=endcallbackfunc)
+        wrapped_playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=playbackOptions.portaudioDeviceID, onPlaybackStart=startcallbackfunc, onPlaybackEnd=endcallbackfunc)
 
-        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=playbackOptions)
+        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=wrapped_playbackOptions)
         self._eventStreamQueue.put((newEvent, streamFuture))
 
     def _ordering_thread(self):
@@ -401,7 +433,7 @@ def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:Playbac
     Parameters:
          audioData (bytes|numpy.ndarray): The audio data to play, either in bytes or as a numpy array (float32!)
          playbackOptions (PlaybackOptions, optional): The playback options.
-         audioFormat (str, optional): The format of audioData - same formats used for GenerationOptions. If not mp3, then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
+         audioFormat (str, optional): The format of audioData - same formats used for GenerationOptions. If not mp3 (or numpy array), then has to specify the samplerate in the format (like pcm_44100). Defaults to mp3.
     Returns:
         None
     """

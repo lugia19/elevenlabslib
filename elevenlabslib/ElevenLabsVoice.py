@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from elevenlabslib.ElevenLabsUser import ElevenLabsUser
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker, _open_soundfile
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -322,6 +322,7 @@ class ElevenLabsVoice:
         websocketURL = f"wss://api.elevenlabs.io/v1/text-to-speech/{self.voiceID}/stream-input?model_id={generationOptions.model_id}"
         for key, value in self._generate_parameters(generationOptions).items():
             websocketURL += f"&{key}={value}"
+        websocketURL += f"&enable_ssml_parsing={str(websocketOptions.enable_ssml_parsing).lower()}"
         websocket = connect(
             websocketURL,
             additional_headers=self.linkedUser.headers
@@ -587,8 +588,8 @@ class ElevenLabsVoice:
             promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
         Returns:
             A tuple consisting of:
-            -Queue for the audio as float32 numpy arrays, with None acting as the termination indicator.
-            -Queue for transcripts, with None as the termination indicator.
+            - Queue for the audio as float32 numpy arrays, with None acting as the termination indicator.
+            - Queue for transcripts, with None as the termination indicator (if websocket streaming was used).
         """
 
         #We need the real sample rate.
@@ -1000,9 +1001,7 @@ class _AudioStreamer:
         while True:
             try:
                 data = json.loads(self._connection.recv()) #We block because we know we're waiting on more messages.
-
                 alignment_data = data.get("normalizedAlignment", None)
-
                 if alignment_data is not None:
                     formatted_list = list()
                     for i in range(len(alignment_data["chars"])):
@@ -1846,3 +1845,6 @@ class _NumpyStreamer(_AudioStreamer):
                         logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
                         self._events["blockDataAvailable"].set()
 
+
+class _Mp3Streamer2(_NumpyStreamer):
+    pass
