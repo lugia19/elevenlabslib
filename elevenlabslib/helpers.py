@@ -221,11 +221,11 @@ class WebsocketOptions:
 
     Parameters:
         chunk_length_schedule (list[int], optional): Chunking schedule for generation. If you pass [50, 120, 500], the first audio chunk will be generated after recieving 50 characters, the second after 120 more (so 170 total), and the third onwards after 500. Defaults to [50], so always generating ASAP.
-        try_trigger_generation (bool, optional): Whether to try and generate the first chunk of audio at >50 characters, regardless of the chunk_length_schedule. Defaults to true.
+        try_trigger_generation (bool, optional): Whether to try and generate a chunk of audio at >50 characters, regardless of the chunk_length_schedule. Defaults to False, sent with every message.
         enable_ssml_parsing (bool, optional): Whether to enable parsing of SSML tags, such as breaks or pronunciations. Increases latency. Defaults to False.
     """
-    try_trigger_generation: bool = True
-    chunk_length_schedule: List[int] = dataclasses.field(default_factory=lambda: [50])
+    try_trigger_generation: bool = False
+    chunk_length_schedule: List[int] = dataclasses.field(default_factory=lambda: [125])
     enable_ssml_parsing: bool = False
 
     def __post_init__(self):
