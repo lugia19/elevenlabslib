@@ -3,8 +3,10 @@ from __future__ import annotations
 import audioop
 import base64
 import concurrent.futures
+import dataclasses
 import inspect
 import math
+import threading
 from concurrent.futures import Future
 from typing import Iterator, AsyncIterator
 from typing import TYPE_CHECKING
@@ -222,7 +224,7 @@ class ElevenLabsVoice:
         _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
         self._settings = payload
 
-    def _generate_payload(self, prompt:Union[str, bytes, BinaryIO], generationOptions:GenerationOptions=None):
+    def _generate_payload_and_options(self, prompt:Union[str, bytes, BinaryIO], generationOptions:GenerationOptions=None) -> (dict, GenerationOptions):
         """
         Generates the payload for the text-to-speech API call.
 
@@ -230,29 +232,23 @@ class ElevenLabsVoice:
             prompt (str|bytes): The prompt or audio to generate speech for.
             generationOptions (GenerationOptions): The options for this generation.
         Returns:
+            A tuple of:
             dict: A dictionary representing the payload for the API call.
+            GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
         if generationOptions is None:
             generationOptions = GenerationOptions()
+        else:
+            generationOptions = dataclasses.replace(generationOptions)  #Ensure we have a copy, not the original.
 
-        overriddenVoiceSettings = [generationOptions.stability, generationOptions.similarity_boost]
-        if "v2" in generationOptions.model_id:
-            overriddenVoiceSettings.append(generationOptions.style)
-            overriddenVoiceSettings.append(generationOptions.use_speaker_boost)
-
-        include_settings = False
-        voice_settings = None
-        for value in overriddenVoiceSettings:
-            if value is not None:
-                include_settings = True
-                break
-
-        if include_settings:
-            currentSettings = self.settings
-            voice_settings = dict()
-            for key, currentValue in currentSettings.items():
-                overriddenValue = getattr(generationOptions, key, None)
-                voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
+        voice_settings = dict()
+        for key, currentValue in self.settings.items():
+            overriddenValue = getattr(generationOptions, key, None)
+            if overriddenValue is None:
+                voice_settings[key] = currentValue
+                setattr(generationOptions, key, currentValue)
+            else:
+                voice_settings[key] = overriddenValue
 
         model_id = generationOptions.model_id
 
@@ -264,13 +260,12 @@ class ElevenLabsVoice:
         else:
             payload = {"model_id": model_id}
 
-        if voice_settings is not None:
-            if isinstance(prompt, str):
-                payload["voice_settings"] = voice_settings
-            else:
-                payload["voice_settings"] = json.dumps(voice_settings)
+        if isinstance(prompt, str):
+            payload["voice_settings"] = voice_settings
+        else:
+            payload["voice_settings"] = json.dumps(voice_settings)
 
-        return payload
+        return payload, generationOptions
 
     def _generate_parameters(self, generationOptions:GenerationOptions = None):
         if generationOptions is None:
@@ -281,31 +276,30 @@ class ElevenLabsVoice:
         params["output_format"] = generationOptions.output_format
         return params
 
-    def _generate_websocket_connection(self, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> websockets.sync.client.ClientConnection:
+    def _generate_websocket_and_options(self, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> (websockets.sync.client.ClientConnection, GenerationOptions):
         """
         Generates a websocket connection for the input-streaming endpoint.
 
         Args:
             generationOptions (GenerationOptions): The options for this generation.
         Returns:
+            A tuple of:
             dict: A dictionary representing the payload for the API call.
+            GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
-        voice_settings = None
+        voice_settings = dict()
         if generationOptions is None:
             generationOptions = GenerationOptions()
+        else:
+            generationOptions = dataclasses.replace(generationOptions)  # Ensure we have a copy, not the original.
 
-        overriddenVoiceSettings = [generationOptions.stability, generationOptions.similarity_boost]
-        if "v2" in generationOptions.model_id:
-            overriddenVoiceSettings.append(generationOptions.style)
-            overriddenVoiceSettings.append(generationOptions.use_speaker_boost)
-
-        if None in overriddenVoiceSettings:
-            # The user overrode some voice settings, but not all of them. Let's fetch the others.
-            currentSettings = self.settings
-            voice_settings = dict()
-            for key, currentValue in currentSettings.items():
-                overriddenValue = getattr(generationOptions, key, None)
-                voice_settings[key] = overriddenValue if overriddenValue is not None else currentValue
+        for key, currentValue in self.settings.items():
+            overriddenValue = getattr(generationOptions, key, None)
+            if overriddenValue is None:
+                voice_settings[key] = currentValue
+                setattr(generationOptions, key, currentValue)
+            else:
+                voice_settings[key] = overriddenValue
 
         if websocketOptions is None:
             websocketOptions = WebsocketOptions()
@@ -329,7 +323,7 @@ class ElevenLabsVoice:
         )
         websocket.send(json.dumps(BOS))
 
-        return websocket
+        return websocket, generationOptions
 
     def generate_to_historyID_v2(self, prompt: Union[str,bytes,BinaryIO], generationOptions:GenerationOptions=None) -> str:
         """
@@ -344,7 +338,7 @@ class ElevenLabsVoice:
         if generationOptions is None:
             generationOptions = GenerationOptions()
 
-        payload = self._generate_payload(prompt, generationOptions)
+        payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
         params = self._generate_parameters(generationOptions)
 
         if not isinstance(prompt, str):
@@ -413,7 +407,7 @@ class ElevenLabsVoice:
         #Since we need the sample rate directly, make sure it's a real one.
         generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
 
-        payload = self._generate_payload(prompt, generationOptions)
+        payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
         params = self._generate_parameters(generationOptions)
         if isinstance(prompt, str):
             requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
@@ -517,7 +511,7 @@ class ElevenLabsVoice:
             promptingOptions = None     #Ignore them if not generating a normal string.
 
         if isinstance(prompt, str) and promptingOptions is None:
-            payload = self._generate_payload(prompt, generationOptions)
+            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
@@ -527,7 +521,7 @@ class ElevenLabsVoice:
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
             is_sts = True
-            payload = self._generate_payload(prompt, generationOptions)
+            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
             path = "/speech-to-speech/" + self._voiceID + "/stream"
             # Using speech to speech
             params = self._generate_parameters(generationOptions)
@@ -544,7 +538,7 @@ class ElevenLabsVoice:
         elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or promptingOptions is not None:
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+            responseConnection, generationOptions = self._generate_websocket_and_options(generationOptions, websocketOptions)
         else:
             raise ValueError("Unknown type passed for prompt.")
 
@@ -606,7 +600,7 @@ class ElevenLabsVoice:
             promptingOptions = None     #Ignore them if not generating a normal string.
 
         if isinstance(prompt, str):
-            payload = self._generate_payload(prompt, generationOptions)
+            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             #Not using input streaming
             params = self._generate_parameters(generationOptions)
@@ -615,7 +609,7 @@ class ElevenLabsVoice:
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
-            payload = self._generate_payload(prompt, generationOptions)
+            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
             path = "/speech-to-speech/" + self._voiceID + "/stream"
             # Using speech to speech
             params = self._generate_parameters(generationOptions)
@@ -632,7 +626,7 @@ class ElevenLabsVoice:
         elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection = self._generate_websocket_connection(generationOptions, websocketOptions)
+            responseConnection, generationOptions = self._generate_websocket_and_options(generationOptions, websocketOptions)
         else:
             raise ValueError("Prompt is of unknown type.")
 
@@ -832,6 +826,20 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
 
 #This way lies only madness.
 
+def _set_websocket_buffer_amount(websocket_options:WebsocketOptions, generation_options:GenerationOptions):
+    """
+    Returns a new websocket_options with the correct buffer value.
+    """
+
+    # Don't do anything if the user overwrote it.
+    websocket_options = dataclasses.replace(websocket_options)
+    if websocket_options.buffer_char_length == -1:
+        if generation_options.model_id == "eleven_multilingual_v2":
+            websocket_options.buffer_char_length = 50
+            if generation_options.style is not None and generation_options.style > 0:
+                websocket_options.buffer_char_length = 100
+    return websocket_options
+
 #This is to work around an issue. May god have mercy on my soul.
 class BodgedSoundFile(sf.SoundFile):
     def buffer_read(self, frames=-1, dtype=None):
@@ -864,7 +872,9 @@ class BodgedSoundFile(sf.SoundFile):
 class _AudioStreamer:
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
-        self._events = dict()
+        self._events: dict[str, threading.Event] = {
+            "websocketDataSufficient": threading.Event()    #Technically this is only relevant for playback. HOWEVER, it's _AudioStreamer itself that handles firing it. So it's here.
+        }
         self._current_audio_ms = 0
         self.transcript_queue = queue.Queue()   #Holds the transcripts for the audio data
         self._enable_cutout = False
@@ -882,8 +892,12 @@ class _AudioStreamer:
         self._connection = streamConnection
         self._generation_options = generation_options
         self._sample_rate = int(generation_options.output_format.split("_")[1])
-        self._websocket_options = websocket_options
+        self._websocket_options = _set_websocket_buffer_amount(websocket_options, generation_options)
+
         self._prompt = prompt
+
+        # self._requiredWebsocketChars = 0       It's just self._websocket_options.buffer_char_length
+        self._currentWebsocketChars = 0
 
     def _check_position(self, curr_frame) -> (bool, int, int):
         start_delta = None
@@ -997,12 +1011,24 @@ class _AudioStreamer:
 
         sender_thread = threading.Thread(target=sender)
         sender_thread.start()
-
+        #websocketDataSufficient
+        last_alignment_length = None    #This is used for buffering.
         while True:
             try:
                 data = json.loads(self._connection.recv()) #We block because we know we're waiting on more messages.
                 alignment_data = data.get("normalizedAlignment", None)
                 if alignment_data is not None:
+
+                    print(f"Last alignment length is: {last_alignment_length}")
+
+                    if last_alignment_length is not None:
+                        self._currentWebsocketChars += last_alignment_length
+                    print(f"Current char count: {self._currentWebsocketChars}/{self._websocket_options.buffer_char_length}")
+                    if self._currentWebsocketChars >= self._websocket_options.buffer_char_length:
+                        print("Setting event...")
+                        self._events["websocketDataSufficient"].set()
+
+                    last_alignment_length = len(alignment_data["chars"])
                     formatted_list = list()
                     for i in range(len(alignment_data["chars"])):
                         new_char = {
@@ -1038,7 +1064,7 @@ class _AudioStreamer:
                 break
 
         self.transcript_queue.put(None) #We're done with the transcripts
-
+        self._events["websocketDataSufficient"].set()   #Just in case the buffer was set to be longer than the amount of characters.
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
         sender_thread.join()    #Just in case something went wrong.
@@ -1050,9 +1076,9 @@ class _DownloadStreamer(_AudioStreamer):
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
-        self._events: dict[str, threading.Event] = {
+        self._events.update({
             "downloadDoneEvent": threading.Event()
-        }
+        })
         self.destination_queue = queue.Queue()
         if "mp3" in generation_options.output_format.lower():
             self._framesize = 4
@@ -1095,15 +1121,23 @@ class _Mp3Streamer(_AudioStreamer):
         self._frameSize = 0
         self.last_recreated_pos = 0 #Handling for a bug.
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
-
-        self._events: dict[str, threading.Event] = {
+        self._events.update({
             "playbackFinishedEvent": threading.Event(),
             "headerReadyEvent": threading.Event(),
             "soundFileReadyEvent": threading.Event(),
             "downloadDoneEvent": threading.Event(),
             "blockDataAvailable": threading.Event(),
             "playbackStartFired": threading.Event()
-        }
+        })
+
+        if self._websocket_options.buffer_char_length > 0 and isinstance(streamConnection, websockets.sync.client.ClientConnection):
+            old_playback_start = self._onPlaybackStart
+            def playbackStartWrapper():
+                # Wait for the amount of websocket data to be sufficient...
+                self._events["websocketDataSufficient"].wait()
+                old_playback_start()
+
+            self._onPlaybackStart = playbackStartWrapper
 
     def _stream_downloader_function(self):
         super()._stream_downloader_function()
@@ -1432,12 +1466,12 @@ class _RAWStreamer(_AudioStreamer):
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
         self._channels = 1
         self._frameSize = 2
-        self._events: dict[str, threading.Event] = {
+        self._events.update({
             "playbackFinishedEvent": threading.Event(),
             "downloadDoneEvent": threading.Event(),
             "playbackStartFired": threading.Event(),
             "blockDataAvailable": threading.Event()
-        }
+        })
         self._buffer = b""
         self._audio_length = 0
 
@@ -1555,12 +1589,12 @@ class _NumpyStreamer(_AudioStreamer):
         parts = generation_options.output_format.lower().split("_")
         self._subtype = parts[0]
 
-        self._events: dict[str, threading.Event] = {
+        self._events.update({
             "headerReadyEvent": threading.Event(),
             "soundFileReadyEvent": threading.Event(),
             "downloadDoneEvent": threading.Event(),
             "blockDataAvailable": threading.Event()
-        }
+        })
 
         self.destination_queue = queue.Queue()
         if "mp3" in generation_options.output_format.lower():
@@ -1844,7 +1878,3 @@ class _NumpyStreamer(_AudioStreamer):
                     if endPos - lastReadPos > _playbackBlockSize:  # We've read enough data to fill up a block, alert the other thread.
                         logging.debug("Raise available data event - " + str(endPos - lastReadPos) + " bytes available")
                         self._events["blockDataAvailable"].set()
-
-
-class _Mp3Streamer2(_NumpyStreamer):
-    pass

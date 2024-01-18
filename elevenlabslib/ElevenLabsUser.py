@@ -544,17 +544,17 @@ class ElevenLabsUser:
         """
         if self._subscriptionTier is None:
             self.update_audio_quality()
-        new_options = dataclasses.replace(generationOptions)
-        if "highest" in new_options.output_format:
-            if "mp3" in new_options.output_format:
+        generationOptions = dataclasses.replace(generationOptions)
+        if "highest" in generationOptions.output_format:
+            if "mp3" in generationOptions.output_format:
                 if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("creator"):
-                    new_options.output_format = "mp3_44100_192"
+                    generationOptions.output_format = "mp3_44100_192"
                 else:
-                    new_options.output_format = "mp3_44100_128"
+                    generationOptions.output_format = "mp3_44100_128"
             else:
                 if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("pro"):
-                    new_options.output_format = "pcm_44100"
+                    generationOptions.output_format = "pcm_44100"
                 else:
-                    new_options.output_format = "pcm_24000"
+                    generationOptions.output_format = "pcm_24000"
 
-        return new_options
+        return generationOptions
