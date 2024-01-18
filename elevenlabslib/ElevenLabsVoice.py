@@ -1475,6 +1475,15 @@ class _RAWStreamer(_AudioStreamer):
         self._buffer = b""
         self._audio_length = 0
 
+        if self._websocket_options.buffer_char_length > 0 and isinstance(streamConnection, websockets.sync.client.ClientConnection):
+            old_playback_start = self._onPlaybackStart
+            def playbackStartWrapper():
+                # Wait for the amount of websocket data to be sufficient...
+                self._events["websocketDataSufficient"].wait()
+                old_playback_start()
+
+            self._onPlaybackStart = playbackStartWrapper
+
     def _stream_downloader_function(self):
         super()._stream_downloader_function()
         self._stream_downloader_chunk_handler(b"")
