@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import dataclasses
 import io
 import queue
 import zipfile
@@ -542,17 +544,17 @@ class ElevenLabsUser:
         """
         if self._subscriptionTier is None:
             self.update_audio_quality()
-
-        if "highest" in generationOptions.output_format:
-            if "mp3" in generationOptions.output_format:
+        new_options = dataclasses.replace(generationOptions)
+        if "highest" in new_options.output_format:
+            if "mp3" in new_options.output_format:
                 if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("creator"):
-                    generationOptions.output_format = "mp3_44100_192"
+                    new_options.output_format = "mp3_44100_192"
                 else:
-                    generationOptions.output_format = "mp3_44100_128"
+                    new_options.output_format = "mp3_44100_128"
             else:
                 if subscription_tiers.index(self._subscriptionTier) >= subscription_tiers.index("pro"):
-                    generationOptions.output_format = "pcm_44100"
+                    new_options.output_format = "pcm_44100"
                 else:
-                    generationOptions.output_format = "pcm_24000"
+                    new_options.output_format = "pcm_24000"
 
-        return generationOptions
+        return new_options
