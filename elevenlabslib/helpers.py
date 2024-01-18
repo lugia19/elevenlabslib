@@ -719,24 +719,35 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
 
     return response
 
-#Taken from the official python library - https://github.com/elevenlabs/elevenlabs-python
-def _text_chunker(chunks: Iterator[str], generation_options:GenerationOptions) -> Iterator[str]:
+#Modified from the official python library - https://github.com/elevenlabs/elevenlabs-python
+def _text_chunker(chunks: Union[Iterator[str], Iterator[tuple[str, bool]]], generation_options:GenerationOptions, websocket_options:WebsocketOptions) -> Iterator[tuple[str, bool]]:
     """Used during input streaming to chunk text blocks and set last char to space"""
     splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
     buffer = ""
 
     for text in chunks:
+        try_trigger_gen = websocket_options.try_trigger_generation
+        if isinstance(text, tuple):
+            try_trigger_gen = text[1]
+            text = text[0]
+
         if buffer.endswith(splitters):
-            yield apply_pronunciations(buffer, generation_options) if buffer.endswith(" ") else apply_pronunciations(buffer + " ", generation_options)
+            if buffer.endswith(" "):
+                yield apply_pronunciations(buffer, generation_options), try_trigger_gen
+            else:
+                yield apply_pronunciations(buffer + " ", generation_options), try_trigger_gen
             buffer = text
         elif text.startswith(splitters):
             output = buffer + text[0]
-            yield apply_pronunciations(output, generation_options) if output.endswith(" ") else apply_pronunciations(output + " ", generation_options)
+            if output.endswith(" "):
+                yield apply_pronunciations(output, generation_options), try_trigger_gen
+            else:
+                yield apply_pronunciations(output + " ", generation_options), try_trigger_gen
             buffer = text[1:]
         else:
             buffer += text
     if buffer != "":
-        yield apply_pronunciations(buffer + " ", generation_options)
+        yield apply_pronunciations(buffer + " ", generation_options), websocket_options.try_trigger_generation  #We're at the end, so it's not like it actually matters.
 
 
 def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):

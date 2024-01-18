@@ -999,8 +999,8 @@ class _AudioStreamer:
         logging.debug("Starting iter...")
 
         def sender():
-            for text_chunk in _text_chunker(self._prompt, self._generation_options):
-                sent_data = dict(text=text_chunk, try_trigger_generation=self._websocket_options.try_trigger_generation)
+            for text_chunk, try_trigger_gen in _text_chunker(self._prompt, self._generation_options, self._websocket_options):
+                sent_data = dict(text=text_chunk, try_trigger_generation=try_trigger_gen)
                 try:
                     self._connection.send(json.dumps(sent_data))
                 except websockets.exceptions.ConnectionClosedError as e:
