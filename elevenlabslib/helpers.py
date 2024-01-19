@@ -289,12 +289,15 @@ class Synthesizer:
 
     They will all be downloaded together, and will play back in the same order you put them in. I've found this gives the lowest possible latency.
     """
-    def __init__(self, defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True), defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3)):
+    def __init__(self, defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
+                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
+                 defaultPromptingOptions:PromptingOptions=None):
         """
         Initializes the Synthesizer instance.
         Parameters:
             defaultPlaybackOptions (PlaybackOptions, optional): The default playback options (for the onPlayback callbacks), that will be used if none are specified when calling add_to_queue
             defaultGenerationOptions (GenerationOptions, optional): The default generation options, that will be used if none are specified when calling add_to_queue
+            defaultGenerationOptions (PromptingOptions, optional): The default prompting options, that will be used if none are specified when calling add_to_queue
         """
 
         self._eventStreamQueue = queue.Queue()
@@ -304,6 +307,7 @@ class Synthesizer:
         self._interruptEvent = threading.Event()
         self._currentStream: sd.OutputStream = None
         self._defaultGenOptions = defaultGenerationOptions
+        self._defaultPromptOptions = defaultPromptingOptions
         if isinstance(defaultPlaybackOptions, int):
             logging.warning("Synthesizer no longer takes portAudioDeviceID as a parameter, please use defaultPlaybackOptions from now on. Wrapping it...")
             defaultPlaybackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=defaultPlaybackOptions)
@@ -340,7 +344,7 @@ class Synthesizer:
         warn("This is deprecated, use change_default_settings to change it through the defaultPlaybackOptions instead.", DeprecationWarning)
         self._defaultPlayOptions.portaudioDeviceID = portAudioDeviceID
 
-    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None):
+    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, defaultPromptingOptions:PromptingOptions=None):
         """
         Allows you to change the default settings.
         """
@@ -348,8 +352,10 @@ class Synthesizer:
             self._defaultGenOptions = defaultGenerationOptions
         if defaultPlaybackOptions is not None:
             self._defaultPlayOptions = defaultPlaybackOptions
+        if defaultPromptingOptions is not None:
+            self._defaultPromptOptions = defaultPromptingOptions
 
-    def add_to_queue(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None) -> None:
+    def add_to_queue(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None, promptingOptions:PromptingOptions=None) -> None:
         """
         Adds an item to the synthesizer queue.
         Parameters:
@@ -357,18 +363,21 @@ class Synthesizer:
             prompt (str): The prompt to be spoken
             generationOptions (GenerationOptions, optional): Overrides the generation options for this generation
             playbackOptions (PlaybackOptions, optional): Overrides the playback options for this generation
+            promptingOptions (PromptingOptions): Overrides the prompting options for this generation
         """
         if generationOptions is None:
             generationOptions = self._defaultGenOptions
         if playbackOptions is None:
             playbackOptions = self._defaultPlayOptions
-        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions))
+        if promptingOptions is None:
+            promptingOptions = self._defaultPromptOptions
+        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions, promptingOptions))
 
     def _consumer_thread(self):
         voice, prompt, genOptions, playOptions = None, None, None, None
         while not self._interruptEvent.is_set():
             try:
-                voice, prompt, genOptions, playOptions = self._ttsQueue.get(timeout=10)
+                voice, prompt, genOptions, playOptions, promptOptions = self._ttsQueue.get(timeout=10)
                 playOptions = dataclasses.replace(playOptions, runInBackground=True) #Ensure this is set to true, always.
             except queue.Empty:
                 continue
@@ -378,9 +387,9 @@ class Synthesizer:
                     return
 
             logging.debug(f"Synthesizing prompt: {prompt}")
-            self._generate_events(voice, prompt, genOptions, playOptions)
+            self._generate_events_and_begin(voice, prompt, genOptions, playOptions, promptOptions)
 
-    def _generate_events(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions):
+    def _generate_events_and_begin(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions, promptingOptions:PromptingOptions):
         newEvent = threading.Event()
 
         def startcallbackfunc():
@@ -394,7 +403,7 @@ class Synthesizer:
 
         wrapped_playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=playbackOptions.portaudioDeviceID, onPlaybackStart=startcallbackfunc, onPlaybackEnd=endcallbackfunc)
 
-        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=wrapped_playbackOptions)
+        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=wrapped_playbackOptions, promptingOptions=promptingOptions)
         self._eventStreamQueue.put((newEvent, streamFuture))
 
     def _ordering_thread(self):
