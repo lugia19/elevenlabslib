@@ -1,5 +1,8 @@
 import asyncio
+import concurrent.futures
+from concurrent.futures import Future
 import dataclasses
+import inspect
 import io
 import json
 import logging
@@ -7,7 +10,7 @@ import queue
 import threading
 import time
 import zlib
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator
 from warnings import warn
 
 import numpy
@@ -16,6 +19,8 @@ import soundfile
 import soundfile as sf
 import requests
 import os
+
+import websockets.sync.client
 
 from elevenlabslib import ElevenLabsVoice
 from elevenlabslib.ElevenLabsModel import ElevenLabsModel
@@ -202,6 +207,14 @@ class GenerationOptions:
         if self.output_format not in validOutputFormats:
             raise ValueError("Selected output format is not valid.")
 
+    def get_voice_settings_dict(self) -> dict:
+        return {
+            "similarity_boost":self.similarity_boost,
+            "stability":self.stability,
+            "style":self.style,
+            "use_speaker_boost":self.use_speaker_boost
+        }
+
 def apply_pronunciations(text:str, generation_options:GenerationOptions) -> str:
     supported_models = ["eleven_monolingual_v1", "eleven_turbo_v2"]
     if generation_options.model_id not in supported_models:
@@ -316,7 +329,8 @@ class Synthesizer:
         Stops playing back audio immediately.
         """
         self.stop()
-        self._currentStream.stop()
+        if self._currentStream is not None:
+            self._currentStream.stop()
 
     def change_output_device(self, portAudioDeviceID:int):
         """
@@ -354,6 +368,7 @@ class Synthesizer:
         while True:
             try:
                 voice, prompt, genOptions, playOptions = self._ttsQueue.get(timeout=10)
+                playOptions = dataclasses.replace(playOptions, runInBackground=True) #Ensure this is set to true, always.
             except queue.Empty:
                 continue
             finally:
@@ -396,6 +411,148 @@ class Synthesizer:
                 nextEvent.set()
                 self._currentStream = nextStreamFuture.result()
                 break
+
+class ReusableInputStreamer:
+    """
+    This is basically a reusable wrapper around a websocket connection.
+    """
+    def __init__(self, voice:ElevenLabsVoice,
+                 defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
+                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
+                 websocketOptions:WebsocketOptions=WebsocketOptions()
+                 ):
+        self._voice = voice
+        self._websocket_ready_event = threading.Event()
+        self._generationOptions = defaultGenerationOptions
+        self._defaultPlayOptions = defaultPlaybackOptions
+        self._interruptEvent = threading.Event()
+        self._currentStream: sd.OutputStream = None
+        self._websocket: websockets.sync.client.ClientConnection = None
+        self._websocketOptions = websocketOptions
+        self._currentGenOptions: GenerationOptions = None   #These are the options tied to the current voice.
+        self._renew_socket()
+        self._ping_thread = threading.Thread(target=self._ping_function)
+        self._ping_thread.start()
+        self._iterator_queue = queue.Queue()
+
+        threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
+
+    def change_voice(self, voice:ElevenLabsVoice):
+        self._voice = voice
+        self._renew_socket()
+    def stop(self):
+        """
+        Stops playing back audio once the current one is finished.
+        """
+        self._interruptEvent.set()
+
+    def abort(self):
+        """
+        Stops playing back audio immediately.
+        """
+        self.stop()
+        if self._currentStream is not None:
+            self._currentStream.stop()
+        if self._websocket is not None:
+            self._websocket.close_socket()
+    def change_settings(self, generationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, websocketOptions:WebsocketOptions=None):
+        """
+        Allows you to change the settings and then re-establishes the socket.
+        """
+        if generationOptions is not None:
+            self._generationOptions = generationOptions
+
+        if defaultPlaybackOptions is not None:
+            self._defaultPlayOptions = defaultPlaybackOptions
+
+        if websocketOptions is not None:
+            self._websocketOptions = websocketOptions
+
+        self._renew_socket()
+    def _renew_socket(self):
+        self._websocket_ready_event.clear()
+        self._websocket = None
+        self._websocket, self._currentGenOptions = self._voice._generate_websocket_and_options(self._websocketOptions, self._generationOptions) # noqa - shut up, I know it's internal.
+        self._currentGenOptions = self._voice.linkedUser.get_real_audio_format(self._currentGenOptions)
+        self._websocket_ready_event.set()
+
+    def _ping_function(self):
+        while not self._interruptEvent.is_set():
+            pong = self._websocket.ping()
+            ping_replied = pong.wait(timeout=1)
+            if not ping_replied and not self._interruptEvent.is_set():
+                #websocket is dead. Set up a new one.
+                self._renew_socket()
+
+    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> concurrent.futures.Future:
+        """
+        Queues up an audio to be generated and played back.
+
+        Arguments:
+            prompt: The iterator to use for the generation.
+            playbackOptions: Overrides the playbackOptions for this generation.
+
+        Returns:
+            future: A future which will contain the transcript queue for this audio.
+        """
+        if playbackOptions is None:
+            playbackOptions = self._defaultPlayOptions
+        if inspect.isasyncgen(prompt):
+            prompt = SyncIterator(prompt)
+
+        playbackOptions = dataclasses.replace(playbackOptions)  #Ensure it's a copy.
+        transcript_queue_future = concurrent.futures.Future()
+
+        if not playbackOptions.runInBackground:
+            #Add an event and wait until it's done with the playback.
+            playback_done_event = threading.Event()
+            old_playbackend = playbackOptions.onPlaybackEnd
+            def wrapper():
+                playback_done_event.set()
+                old_playbackend()
+            playbackOptions.onPlaybackEnd = wrapper
+            self._iterator_queue.put((prompt, playbackOptions, transcript_queue_future))
+            playback_done_event.wait()
+        else:
+            self._iterator_queue.put((prompt, playbackOptions, transcript_queue_future))
+        return transcript_queue_future
+
+    def _consumer_thread(self):
+        prompt, playbackOptions, transcript_future = None, None, None
+        while True:
+            try:
+                prompt, playbackOptions, transcript_future = self._iterator_queue.get(timeout=5)
+            except queue.Empty:
+                continue
+            finally:
+                if self._interruptEvent.is_set():
+                    return
+
+            while not self._websocket_ready_event.is_set():
+                self._websocket_ready_event.wait(timeout=1)
+                if self._interruptEvent.is_set():
+                    return
+
+            from elevenlabslib.ElevenLabsVoice import _Mp3Streamer, _RAWStreamer
+            streamer: Union[_Mp3Streamer, _RAWStreamer]
+
+            if "mp3" in self._currentGenOptions.output_format:
+                streamer = _Mp3Streamer(playbackOptions, self._websocket, self._currentGenOptions, self._websocketOptions, prompt, None)
+            else:
+                streamer = _RAWStreamer(playbackOptions, self._websocket, self._currentGenOptions, self._websocketOptions, prompt, None)
+
+            stream_future = concurrent.futures.Future()
+
+            mainThread = threading.Thread(target=streamer.begin_streaming, args=(stream_future,))
+            mainThread.start()
+
+            self._currentStream = stream_future.result(timeout=10)
+
+            transcript_future:concurrent.futures.Future
+            transcript_future.set_result(streamer.transcript_queue)
+
+            mainThread.join()
+
 
 def run_ai_speech_classifier(audioBytes:bytes):
     """

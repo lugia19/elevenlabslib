@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import audioop
 import base64
-import concurrent.futures
+
 import dataclasses
 import inspect
 import math
 import threading
+import concurrent.futures
 from concurrent.futures import Future
 from typing import Iterator, AsyncIterator
 from typing import TYPE_CHECKING
@@ -240,15 +241,8 @@ class ElevenLabsVoice:
             generationOptions = GenerationOptions()
         else:
             generationOptions = dataclasses.replace(generationOptions)  #Ensure we have a copy, not the original.
-
-        voice_settings = dict()
-        for key, currentValue in self.settings.items():
-            overriddenValue = getattr(generationOptions, key, None)
-            if overriddenValue is None:
-                voice_settings[key] = currentValue
-                setattr(generationOptions, key, currentValue)
-            else:
-                voice_settings[key] = overriddenValue
+        generationOptions = self._complete_generation_options(generationOptions)
+        voice_settings = generationOptions.get_voice_settings_dict()
 
         model_id = generationOptions.model_id
 
@@ -267,6 +261,14 @@ class ElevenLabsVoice:
 
         return payload, generationOptions
 
+    def _complete_generation_options(self, generationOptions:GenerationOptions) -> GenerationOptions:
+        generationOptions = dataclasses.replace(generationOptions)
+        for key, currentValue in self.settings.items():
+            overriddenValue = getattr(generationOptions, key, None)
+            if overriddenValue is None:
+                setattr(generationOptions, key, currentValue)
+        return generationOptions
+
     def _generate_parameters(self, generationOptions:GenerationOptions = None):
         if generationOptions is None:
             generationOptions = GenerationOptions()
@@ -276,7 +278,7 @@ class ElevenLabsVoice:
         params["output_format"] = generationOptions.output_format
         return params
 
-    def _generate_websocket_and_options(self, generationOptions:GenerationOptions=None, websocketOptions:WebsocketOptions=None) -> (websockets.sync.client.ClientConnection, GenerationOptions):
+    def _generate_websocket_and_options(self, websocketOptions:WebsocketOptions=None, generationOptions:GenerationOptions=None) -> (websockets.sync.client.ClientConnection, GenerationOptions):
         """
         Generates a websocket connection for the input-streaming endpoint.
 
@@ -287,19 +289,13 @@ class ElevenLabsVoice:
             dict: A dictionary representing the payload for the API call.
             GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
-        voice_settings = dict()
+
         if generationOptions is None:
             generationOptions = GenerationOptions()
         else:
             generationOptions = dataclasses.replace(generationOptions)  # Ensure we have a copy, not the original.
-
-        for key, currentValue in self.settings.items():
-            overriddenValue = getattr(generationOptions, key, None)
-            if overriddenValue is None:
-                voice_settings[key] = currentValue
-                setattr(generationOptions, key, currentValue)
-            else:
-                voice_settings[key] = overriddenValue
+        generationOptions = self._complete_generation_options(generationOptions)
+        voice_settings = generationOptions.get_voice_settings_dict()
 
         if websocketOptions is None:
             websocketOptions = WebsocketOptions()
@@ -538,7 +534,7 @@ class ElevenLabsVoice:
         elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or promptingOptions is not None:
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection, generationOptions = self._generate_websocket_and_options(generationOptions, websocketOptions)
+            responseConnection, generationOptions = self._generate_websocket_and_options(websocketOptions, generationOptions)
         else:
             raise ValueError("Unknown type passed for prompt.")
 
@@ -626,7 +622,7 @@ class ElevenLabsVoice:
         elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection, generationOptions = self._generate_websocket_and_options(generationOptions, websocketOptions)
+            responseConnection, generationOptions = self._generate_websocket_and_options(websocketOptions, generationOptions)
         else:
             raise ValueError("Prompt is of unknown type.")
 
@@ -1018,14 +1014,9 @@ class _AudioStreamer:
                 data = json.loads(self._connection.recv()) #We block because we know we're waiting on more messages.
                 alignment_data = data.get("normalizedAlignment", None)
                 if alignment_data is not None:
-
-                    print(f"Last alignment length is: {last_alignment_length}")
-
                     if last_alignment_length is not None:
                         self._currentWebsocketChars += last_alignment_length
-                    print(f"Current char count: {self._currentWebsocketChars}/{self._websocket_options.buffer_char_length}")
                     if self._currentWebsocketChars >= self._websocket_options.buffer_char_length:
-                        print("Setting event...")
                         self._events["websocketDataSufficient"].set()
 
                     last_alignment_length = len(alignment_data["chars"])
