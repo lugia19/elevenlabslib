@@ -23,6 +23,35 @@ historyItem = user.get_history_item(generationData[1])
 historyItem.delete()
 ```
 
+## Use ReusableInputStreamer for lower latency websocket streaming
+```python
+import threading
+from elevenlabslib import *
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+text = "This is simply a test text used for websockets."
+
+
+def write():
+    yield text
+
+
+# ReusableInputStreamer takes care of keeping an active websocket connection, ensuring there is always one ready for use.
+# This cuts down on the latency loss due to websockets, as the connection is already prepared beforehand.
+input_streamer = ReusableInputStreamer(voice)
+playback_done_event = threading.Event()
+input_streamer.queue_audio(write())
+input_streamer.queue_audio(write(), playbackOptions=PlaybackOptions(runInBackground=True, onPlaybackEnd=playback_done_event.set))
+
+#Wait for the second playback to end.
+playback_done_event.wait()
+
+# Has to be closed for the code to exit.
+input_streamer.stop()
+```
+
 ## Use prompting to add emotion
 ```python
 from elevenlabslib import *
@@ -37,21 +66,30 @@ prompting_options = PromptingOptions(post_prompt="she shouted angrily.")
 voice.generate_stream_audio_v2("I've had enough!", generationOptions = generation_options, promptingOptions = prompting_options)
 ```
 
-## Speech to speech
+## Control amount of buffering used for websockets
 ```python
 from elevenlabslib import *
 
 user = ElevenLabsUser("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-generation_options = GenerationOptions(model_id="eleven_english_sts_v2", stability=0.2)
+texts = ["This is a test audio for websockets.","This is just meant to showcase how it works.", "This will behave the same as having an LLM generate text."]
+def write():
+    for text in texts:
+        yield text
+#This is the worst-case scenario for speed/latency, multilingual v2 with style enabled.
+generation_options = GenerationOptions(model="eleven_multilingual_v2", style=0.2)
 
-source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
-#sorce_audio can also be bytes, to allow you to pass input from a microphone:
-source_audio_bytes = source_audio_file.read()
+#The library takes care of setting these values by default, I'm only overwriting them here to show them.
+websocket_options = WebsocketOptions(chunk_length_schedule=[125],
+                                     try_trigger_generation=False,
+                                     buffer_char_length=150)
 
-voice.generate_stream_audio_v2(source_audio_file, generationOptions=generation_options)
-voice.generate_stream_audio_v2(source_audio_bytes, generationOptions=generation_options)
+#This will now work without stuttering, but it will add some extra latency before playback begins.
+voice.generate_stream_audio_v2(write(),
+                                PlaybackOptions(runInBackground=False),
+                                generationOptions=generation_options,
+                               websocketOptions=websocket_options)
 ```
 
 ## Force the pronunciation of a word
@@ -108,9 +146,27 @@ for i in range(10):
         synthesizer.add_to_queue(voice, f"This is test {i}.", GenerationOptions(stability=0), PlaybackOptions(onPlaybackStart=lambda: print("Stability 0 Start"), onPlaybackEnd= lambda:print("Stability 0 End")))
         
 input("We're past the for loop already. Hit enter when you'd like to stop the playback.\n")
-synthesizer.abort()
+synthesizer.stop()
 
 ```
+
+## Speech to speech (no longer works with the api key)
+```python
+from elevenlabslib import *
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+generation_options = GenerationOptions(model_id="eleven_english_sts_v2", stability=0.2)
+
+source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
+#sorce_audio can also be bytes, to allow you to pass input from a microphone:
+source_audio_bytes = source_audio_file.read()
+
+voice.generate_stream_audio_v2(source_audio_file, generationOptions=generation_options)
+voice.generate_stream_audio_v2(source_audio_bytes, generationOptions=generation_options)
+```
+
 
 ## Use input streaming with the OpenAI API
 Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c6abb08e8e0a) using the official wrapper.
