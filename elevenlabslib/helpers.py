@@ -14,6 +14,7 @@ from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, Asy
 from warnings import warn
 
 import numpy
+import sounddevice
 import sounddevice as sd
 import soundfile
 import soundfile as sf
@@ -365,7 +366,7 @@ class Synthesizer:
 
     def _consumer_thread(self):
         voice, prompt, genOptions, playOptions = None, None, None, None
-        while True:
+        while not self._interruptEvent.is_set():
             try:
                 voice, prompt, genOptions, playOptions = self._ttsQueue.get(timeout=10)
                 playOptions = dataclasses.replace(playOptions, runInBackground=True) #Ensure this is set to true, always.
@@ -384,6 +385,8 @@ class Synthesizer:
 
         def startcallbackfunc():
             newEvent.wait()
+            if self._interruptEvent.is_set():
+                raise sounddevice.CallbackAbort
             playbackOptions.onPlaybackStart()
         def endcallbackfunc():
             playbackOptions.onPlaybackEnd()
@@ -396,10 +399,10 @@ class Synthesizer:
 
     def _ordering_thread(self):
         nextEvent, nextStreamFuture = None, None
-        while True:
+        while not self._interruptEvent.is_set():
             self._readyForPlaybackEvent.wait()
             self._readyForPlaybackEvent.clear()
-            while True:
+            while not self._interruptEvent.is_set():
                 try:
                     nextEvent, nextStreamFuture = self._eventStreamQueue.get(timeout=10)
                 except queue.Empty:
@@ -407,10 +410,16 @@ class Synthesizer:
                 finally:
                     if self._interruptEvent.is_set():
                         logging.debug("Synthetizer playback loop exiting...")
-                        return
+                        break
                 nextEvent.set()
                 self._currentStream = nextStreamFuture.result()
                 break
+        while True:
+            try:
+                nextEvent, nextStreamFuture = self._eventStreamQueue.get_nowait()
+            except queue.Empty:
+                break
+            nextEvent.set() #Just set all of them so they exit.
 
 class ReusableInputStreamer:
     """
@@ -484,14 +493,14 @@ class ReusableInputStreamer:
             pong = self._websocket.ping()
             ping_replied = pong.wait(timeout=1)
             if (not ping_replied and not self._interruptEvent.is_set()) or time.perf_counter()-self._last_renewal_time > 17:
-                #websocket is dead or stale. Set up a new one.
-
+                #websocket is dead or stale. Nuke it and set up a new one.
+                self._websocket.close_socket()
                 #Stale time is 17 seconds since websocket timeout is 20.
                 #This is required to avoid situations where a new audio might come in,
                 #and the websocket is used despite it actually being dead, because the ping timeout hasn't expired yet.
                 self._renew_socket()
             time.sleep(3)   #Let's avoid hammering the websocket with pings...
-
+        self._websocket.close_socket()
     def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> concurrent.futures.Future:
         """
         Queues up an audio to be generated and played back.
@@ -503,6 +512,8 @@ class ReusableInputStreamer:
         Returns:
             future: A future which will contain the transcript queue for this audio.
         """
+        if self._interruptEvent.is_set():
+            raise ValueError("Do not re-use a closed ReusableInputStreamer!")
         if playbackOptions is None:
             playbackOptions = self._defaultPlayOptions
         if inspect.isasyncgen(prompt):
@@ -527,7 +538,7 @@ class ReusableInputStreamer:
 
     def _consumer_thread(self):
         prompt, playbackOptions, transcript_future = None, None, None
-        while True:
+        while not self._interruptEvent.is_set():
             try:
                 prompt, playbackOptions, transcript_future = self._iterator_queue.get(timeout=5)
             except queue.Empty:
@@ -563,6 +574,7 @@ class ReusableInputStreamer:
             transcript_future.set_result(streamer.transcript_queue)
 
             mainThread.join()
+            current_socket.close_socket()
 
 
 def run_ai_speech_classifier(audioBytes:bytes):

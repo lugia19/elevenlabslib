@@ -993,7 +993,7 @@ class _AudioStreamer:
     def _stream_downloader_function_websockets(self):
         totalLength = 0
         logging.debug("Starting iter...")
-
+        self._connection:websockets.sync.client.ClientConnection
         def sender():
             for text_chunk, try_trigger_gen in _text_chunker(self._prompt, self._generation_options, self._websocket_options):
                 sent_data = dict(text=text_chunk, try_trigger_generation=try_trigger_gen)
@@ -1062,7 +1062,7 @@ class _AudioStreamer:
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
         sender_thread.join()    #Just in case something went wrong.
-
+        self._connection.close_socket() #Close it out.
     def _stream_downloader_chunk_handler(self, chunk):
         pass
 
