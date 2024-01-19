@@ -831,9 +831,9 @@ def _set_websocket_buffer_amount(websocket_options:WebsocketOptions, generation_
     websocket_options = dataclasses.replace(websocket_options)
     if websocket_options.buffer_char_length == -1:
         if generation_options.model_id == "eleven_multilingual_v2":
-            websocket_options.buffer_char_length = 50
+            websocket_options.buffer_char_length = 90
             if generation_options.style is not None and generation_options.style > 0:
-                websocket_options.buffer_char_length = 100
+                websocket_options.buffer_char_length = 150
     return websocket_options
 
 #This is to work around an issue. May god have mercy on my soul.
@@ -1017,8 +1017,11 @@ class _AudioStreamer:
                     if last_alignment_length is not None:
                         self._currentWebsocketChars += last_alignment_length
                     if self._currentWebsocketChars >= self._websocket_options.buffer_char_length:
+                        if not self._events["websocketDataSufficient"].is_set():
+                            logging.debug("No longer buffering.")
                         self._events["websocketDataSufficient"].set()
-
+                    else:
+                        logging.debug(f"Still buffering, current char count: {self._currentWebsocketChars}/{self._websocket_options.buffer_char_length}")
                     last_alignment_length = len(alignment_data["chars"])
                     formatted_list = list()
                     for i in range(len(alignment_data["chars"])):
