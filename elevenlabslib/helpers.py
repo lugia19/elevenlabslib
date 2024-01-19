@@ -418,23 +418,24 @@ class ReusableInputStreamer:
     """
     def __init__(self, voice:ElevenLabsVoice,
                  defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
-                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
+                 generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
                  websocketOptions:WebsocketOptions=WebsocketOptions()
                  ):
         self._voice = voice
         self._websocket_ready_event = threading.Event()
-        self._generationOptions = defaultGenerationOptions
+        self._generationOptions = generationOptions
         self._defaultPlayOptions = defaultPlaybackOptions
         self._interruptEvent = threading.Event()
         self._currentStream: sd.OutputStream = None
         self._websocket: websockets.sync.client.ClientConnection = None
         self._websocketOptions = websocketOptions
         self._currentGenOptions: GenerationOptions = None   #These are the options tied to the current voice.
-        self._renew_socket()
+        self._last_renewal_time = 0
         self._ping_thread = threading.Thread(target=self._ping_function)
-        self._ping_thread.start()
         self._iterator_queue = queue.Queue()
 
+        self._renew_socket()
+        self._ping_thread.start()
         threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
 
     def change_voice(self, voice:ElevenLabsVoice):
@@ -475,14 +476,21 @@ class ReusableInputStreamer:
         self._websocket, self._currentGenOptions = self._voice._generate_websocket_and_options(self._websocketOptions, self._generationOptions) # noqa - shut up, I know it's internal.
         self._currentGenOptions = self._voice.linkedUser.get_real_audio_format(self._currentGenOptions)
         self._websocket_ready_event.set()
+        self._last_renewal_time = time.perf_counter()
 
     def _ping_function(self):
         while not self._interruptEvent.is_set():
+            self._websocket_ready_event.wait()
             pong = self._websocket.ping()
             ping_replied = pong.wait(timeout=1)
-            if not ping_replied and not self._interruptEvent.is_set():
-                #websocket is dead. Set up a new one.
+            if (not ping_replied and not self._interruptEvent.is_set()) or time.perf_counter()-self._last_renewal_time > 17:
+                #websocket is dead or stale. Set up a new one.
+
+                #Stale time is 17 seconds since websocket timeout is 20.
+                #This is required to avoid situations where a new audio might come in,
+                #and the websocket is used despite it actually being dead, because the ping timeout hasn't expired yet.
                 self._renew_socket()
+            time.sleep(3)   #Let's avoid hammering the websocket with pings...
 
     def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> concurrent.futures.Future:
         """
@@ -530,16 +538,19 @@ class ReusableInputStreamer:
 
             while not self._websocket_ready_event.is_set():
                 self._websocket_ready_event.wait(timeout=1)
+
                 if self._interruptEvent.is_set():
                     return
 
+            current_socket = self._websocket
+            threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
             from elevenlabslib.ElevenLabsVoice import _Mp3Streamer, _RAWStreamer
             streamer: Union[_Mp3Streamer, _RAWStreamer]
 
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _Mp3Streamer(playbackOptions, self._websocket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _Mp3Streamer(playbackOptions, current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
             else:
-                streamer = _RAWStreamer(playbackOptions, self._websocket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _RAWStreamer(playbackOptions, current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
 
             stream_future = concurrent.futures.Future()
 
