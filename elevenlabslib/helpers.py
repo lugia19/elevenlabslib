@@ -10,7 +10,7 @@ import queue
 import threading
 import time
 import zlib
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple
 from warnings import warn
 
 import numpy
@@ -510,7 +510,7 @@ class ReusableInputStreamer:
                 self._renew_socket()
             time.sleep(3)   #Let's avoid hammering the websocket with pings...
         self._websocket.close_socket()
-    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> concurrent.futures.Future:
+    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> tuple[Future[sd.OutputStream], Future[queue.Queue]]:
         """
         Queues up an audio to be generated and played back.
 
@@ -519,7 +519,7 @@ class ReusableInputStreamer:
             playbackOptions: Overrides the playbackOptions for this generation.
 
         Returns:
-            future: A future which will contain the transcript queue for this audio.
+            tuple: A tuple consisting of two futures, the one for the playback stream and the one for the transcript queue.
         """
         if self._interruptEvent.is_set():
             raise ValueError("Do not re-use a closed ReusableInputStreamer!")
@@ -530,6 +530,7 @@ class ReusableInputStreamer:
 
         playbackOptions = dataclasses.replace(playbackOptions)  #Ensure it's a copy.
         transcript_queue_future = concurrent.futures.Future()
+        playback_stream_future = concurrent.futures.Future()
 
         if not playbackOptions.runInBackground:
             #Add an event and wait until it's done with the playback.
@@ -539,17 +540,17 @@ class ReusableInputStreamer:
                 playback_done_event.set()
                 old_playbackend()
             playbackOptions.onPlaybackEnd = wrapper
-            self._iterator_queue.put((prompt, playbackOptions, transcript_queue_future))
+            self._iterator_queue.put((prompt, playbackOptions, playback_stream_future, transcript_queue_future ))
             playback_done_event.wait()
         else:
-            self._iterator_queue.put((prompt, playbackOptions, transcript_queue_future))
-        return transcript_queue_future
+            self._iterator_queue.put((prompt, playbackOptions, playback_stream_future, transcript_queue_future))
+        return playback_stream_future, transcript_queue_future
 
     def _consumer_thread(self):
-        prompt, playbackOptions, transcript_future = None, None, None
+        prompt, playbackOptions, stream_future, transcript_future = None, None, None, None
         while not self._interruptEvent.is_set():
             try:
-                prompt, playbackOptions, transcript_future = self._iterator_queue.get(timeout=5)
+                prompt, playbackOptions, stream_future, transcript_future = self._iterator_queue.get(timeout=5)
             except queue.Empty:
                 continue
             finally:
@@ -572,14 +573,10 @@ class ReusableInputStreamer:
             else:
                 streamer = _RAWStreamer(playbackOptions, current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
 
-            stream_future = concurrent.futures.Future()
-
             mainThread = threading.Thread(target=streamer.begin_streaming, args=(stream_future,))
             mainThread.start()
 
-            self._currentStream = stream_future.result(timeout=10)
-
-            transcript_future:concurrent.futures.Future
+            self._currentStream = stream_future.result(timeout=60)
             transcript_future.set_result(streamer.transcript_queue)
 
             mainThread.join()
@@ -909,35 +906,40 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
     return response
 
 #Modified from the official python library - https://github.com/elevenlabs/elevenlabs-python
-def _text_chunker(chunks: Union[Iterator[str], Iterator[tuple[str, bool]]], generation_options:GenerationOptions, websocket_options:WebsocketOptions) -> Iterator[tuple[str, bool]]:
+def _text_chunker(chunks: Iterator[Union[str, dict]], generation_options:GenerationOptions, websocket_options:WebsocketOptions) -> Iterator[dict]:
     """Used during input streaming to chunk text blocks and set last char to space"""
     splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
     buffer = ""
 
-    for text in chunks:
-        try_trigger_gen = websocket_options.try_trigger_generation
-        if isinstance(text, tuple):
-            try_trigger_gen = text[1]
-            text = text[0]
+    for text_or_dict in chunks:
+        if isinstance(text_or_dict, dict):
+            yielded_dict = text_or_dict
+            chunk_text = text_or_dict.get("text","")
+        else:
+            yielded_dict = {"text": text_or_dict,
+                            "try_trigger_generation": websocket_options.try_trigger_generation,
+                            "flush": False}
+            chunk_text = text_or_dict
 
         if buffer.endswith(splitters):
             if buffer.endswith(" "):
-                yield apply_pronunciations(buffer, generation_options), try_trigger_gen
+                yielded_dict["text"] = apply_pronunciations(buffer, generation_options)
             else:
-                yield apply_pronunciations(buffer + " ", generation_options), try_trigger_gen
-            buffer = text
-        elif text.startswith(splitters):
-            output = buffer + text[0]
+                yielded_dict["text"] = apply_pronunciations(buffer + " ", generation_options)
+            yield yielded_dict
+            buffer = chunk_text
+        elif chunk_text.startswith(splitters):
+            output = buffer + chunk_text[0]
             if output.endswith(" "):
-                yield apply_pronunciations(output, generation_options), try_trigger_gen
+                yielded_dict["text"] = apply_pronunciations(output, generation_options)
             else:
-                yield apply_pronunciations(output + " ", generation_options), try_trigger_gen
-            buffer = text[1:]
+                yielded_dict["text"] = apply_pronunciations(output + " ", generation_options)
+            yield yielded_dict
+            buffer = chunk_text[1:]
         else:
-            buffer += text
+            buffer += chunk_text
     if buffer != "":
-        yield apply_pronunciations(buffer + " ", generation_options), websocket_options.try_trigger_generation  #We're at the end, so it's not like it actually matters.
-
+        yield {"text": apply_pronunciations(buffer + " ", generation_options), "try_trigger_generation": False, "flush": False} #We're at the end, so it's not like it actually matters.
 
 def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
     audio_hash = ""

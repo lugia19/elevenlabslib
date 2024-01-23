@@ -66,17 +66,18 @@ prompting_options = PromptingOptions(post_prompt="she shouted angrily.")
 voice.generate_stream_audio_v2("I've had enough!", generationOptions = generation_options, promptingOptions = prompting_options)
 ```
 
-## Control amount of buffering used for websockets
+## Advanced websocket features: Control amount of buffering and force flush on a specific chunk
 ```python
 from elevenlabslib import *
 
 user = ElevenLabsUser("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-texts = ["This is a test audio for websockets.","This is just meant to showcase how it works.", "This will behave the same as having an LLM generate text."]
+texts = ["This is a test audio for websockets.","This is just meant to showcase how it works.", "Like this.", "This will behave the same as having an LLM generate text."]
 def write():
     for text in texts:
-        yield text
+        yield {"text":text, "try_trigger_generation":False, "flush":texts.index(text) == 2}
+
 #This is the worst-case scenario for speed/latency, multilingual v2 with style enabled.
 generation_options = GenerationOptions(model="eleven_multilingual_v2", style=0.2)
 

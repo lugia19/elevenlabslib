@@ -465,7 +465,7 @@ class ElevenLabsVoice:
 
         return audioData, historyID, outputStream
 
-    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], AsyncIterator, bytes, BinaryIO],
+    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], Iterator[dict], AsyncIterator, bytes, BinaryIO],
                                  playbackOptions:PlaybackOptions=PlaybackOptions(),
                                  generationOptions:GenerationOptions=GenerationOptions(),
                                  websocketOptions:WebsocketOptions=WebsocketOptions(),
@@ -479,7 +479,7 @@ class ElevenLabsVoice:
             Currently, when doing input streaming, the API does not return the history item ID. This function will therefore return None in those cases. I will fix it once it does.
 
         Parameters:
-            prompt (str|Iterator[str]|bytes|BinaryIO): The text prompt to generate audio from OR an iterator that returns multiple strings (for input streaming) OR the bytes/file pointer of an audio file.
+            prompt (str|Iterator[str]|Iterator[dict]|bytes|BinaryIO): The text prompt to generate audio from OR an iterator that returns multiple strings or dicts (for input streaming) OR the bytes/file pointer of an audio file.
             playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
@@ -563,7 +563,7 @@ class ElevenLabsVoice:
 
         return history_id, audioStreamFuture, transcript_queue
 
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], bytes, BinaryIO],
+    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], Iterator[dict], bytes, BinaryIO],
                                  generationOptions:GenerationOptions=GenerationOptions(), websocketOptions:WebsocketOptions=WebsocketOptions(),
                                  promptingOptions:PromptingOptions=None) -> (queue.Queue[numpy.ndarray], Optional[queue.Queue[str]]):
         """
@@ -572,7 +572,7 @@ class ElevenLabsVoice:
         If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
 
         Parameters:
-            prompt (str|Iterator[str]): The text prompt or audio bytes/file pointer to generate audio from OR an iterator that returns multiple strings (for input streaming).
+            prompt (str|Iterator[str]|Iterator[dict]): The text prompt or audio bytes/file pointer to generate audio from OR an iterator that returns multiple strings or dicts (for input streaming).
             generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
             promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
@@ -867,7 +867,7 @@ class BodgedSoundFile(sf.SoundFile):
 
 class _AudioStreamer:
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         self._events: dict[str, threading.Event] = {
             "websocketDataSufficient": threading.Event()    #Technically this is only relevant for playback. HOWEVER, it's _AudioStreamer itself that handles firing it. So it's here.
         }
@@ -995,10 +995,9 @@ class _AudioStreamer:
         logging.debug("Starting iter...")
         self._connection:websockets.sync.client.ClientConnection
         def sender():
-            for text_chunk, try_trigger_gen in _text_chunker(self._prompt, self._generation_options, self._websocket_options):
-                sent_data = dict(text=text_chunk, try_trigger_generation=try_trigger_gen)
+            for data_dict in _text_chunker(self._prompt, self._generation_options, self._websocket_options):
                 try:
-                    self._connection.send(json.dumps(sent_data))
+                    self._connection.send(json.dumps(data_dict))
                 except websockets.exceptions.ConnectionClosedError as e:
                     logging.exception(f"Generation failed, shutting down: {e}")
                     raise e
@@ -1068,7 +1067,7 @@ class _AudioStreamer:
 
 class _DownloadStreamer(_AudioStreamer):
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._events.update({
             "downloadDoneEvent": threading.Event()
@@ -1103,7 +1102,7 @@ class _DownloadStreamer(_AudioStreamer):
 class _Mp3Streamer(_AudioStreamer):
 
     def __init__(self, playbackOptions:PlaybackOptions, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._dtype= "float32"
         self._q = queue.Queue()
@@ -1446,7 +1445,7 @@ class _Mp3Streamer(_AudioStreamer):
 
 class _RAWStreamer(_AudioStreamer):
     def __init__(self, playbackOptions:PlaybackOptions, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self._q = queue.Queue()
         self._onPlaybackStart = playbackOptions.onPlaybackStart
@@ -1586,7 +1585,7 @@ class _RAWStreamer(_AudioStreamer):
 #Do I want to spend god knows how many hours finagling this finnicky mp3 streaming code to unify it? No.
 class _NumpyStreamer(_AudioStreamer):
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
 
         parts = generation_options.output_format.lower().split("_")
