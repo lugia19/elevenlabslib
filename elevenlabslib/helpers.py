@@ -582,6 +582,133 @@ class ReusableInputStreamer:
             mainThread.join()
             current_socket.close_socket()
 
+class ReusableInputStreamerNoPlayback:
+    """
+    This is basically a reusable wrapper around a websocket connection.
+    """
+    def __init__(self, voice:ElevenLabsVoice,
+                 generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
+                 websocketOptions:WebsocketOptions=WebsocketOptions()
+                 ):
+        self._voice = voice
+        self._websocket_ready_event = threading.Event()
+        self._generationOptions = generationOptions
+        self._interruptEvent = threading.Event()
+        self._websocket: websockets.sync.client.ClientConnection = None
+        self._websocketOptions = websocketOptions
+        self._currentGenOptions: GenerationOptions = None   #These are the options tied to the current voice.
+        self._last_renewal_time = 0
+        self._ping_thread = threading.Thread(target=self._ping_function)
+        self._iterator_queue = queue.Queue()
+
+        self._renew_socket()
+        self._ping_thread.start()
+        threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
+
+    def change_voice(self, voice:ElevenLabsVoice):
+        self._voice = voice
+        self._renew_socket()
+    def stop(self):
+        """
+        Stops the websocket.
+        """
+        self._interruptEvent.set()
+        if self._websocket is not None:
+            self._websocket.close_socket()
+
+    def abort(self):
+        """
+        Stops the websocket.
+        """
+        self.stop()
+        if self._websocket is not None:
+            self._websocket.close_socket()
+    def change_settings(self, generationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, websocketOptions:WebsocketOptions=None):
+        """
+        Allows you to change the settings and then re-establishes the socket.
+        """
+        if generationOptions is not None:
+            self._generationOptions = generationOptions
+
+        if websocketOptions is not None:
+            self._websocketOptions = websocketOptions
+
+        self._renew_socket()
+    def _renew_socket(self):
+        self._websocket_ready_event.clear()
+        self._websocket = None
+        self._websocket, self._currentGenOptions = self._voice._generate_websocket_and_options(self._websocketOptions, self._generationOptions) # noqa - shut up, I know it's internal.
+        self._currentGenOptions = self._voice.linkedUser.get_real_audio_format(self._currentGenOptions)
+        self._websocket_ready_event.set()
+        self._last_renewal_time = time.perf_counter()
+
+    def _ping_function(self):
+        while not self._interruptEvent.is_set():
+            self._websocket_ready_event.wait()
+            pong = self._websocket.ping()
+            ping_replied = pong.wait(timeout=1)
+            if (not ping_replied and not self._interruptEvent.is_set()) or time.perf_counter()-self._last_renewal_time > 17:
+                #websocket is dead or stale. Nuke it and set up a new one.
+                self._websocket.close_socket()
+                #Stale time is 17 seconds since websocket timeout is 20.
+                #This is required to avoid situations where a new audio might come in,
+                #and the websocket is used despite it actually being dead, because the ping timeout hasn't expired yet.
+                self._renew_socket()
+            time.sleep(3)   #Let's avoid hammering the websocket with pings...
+        self._websocket.close_socket()
+    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator]) -> tuple[Future[queue.Queue], Future[queue.Queue]]:
+        """
+        Queues up an audio to be generated and played back.
+
+        Arguments:
+            prompt: The iterator to use for the generation.
+        Returns:
+            tuple: A tuple consisting of two futures, one for the numpy audio queue and one for the transcript queue.
+        """
+        if self._interruptEvent.is_set():
+            raise ValueError("Do not re-use a closed ReusableInputStreamer!")
+
+        if inspect.isasyncgen(prompt):
+            prompt = SyncIterator(prompt)
+
+        transcript_queue_future = concurrent.futures.Future()
+        audio_queue_future = concurrent.futures.Future()
+
+        self._iterator_queue.put((prompt, audio_queue_future, transcript_queue_future))
+        return audio_queue_future, transcript_queue_future
+
+    def _consumer_thread(self):
+        prompt, audio_queue_future, transcript_queue_future = None, None, None
+        while not self._interruptEvent.is_set():
+            try:
+                prompt, audio_queue_future, transcript_queue_future = self._iterator_queue.get(timeout=5)
+            except queue.Empty:
+                continue
+            finally:
+                if self._interruptEvent.is_set():
+                    return
+
+            while not self._websocket_ready_event.is_set():
+                self._websocket_ready_event.wait(timeout=1)
+
+                if self._interruptEvent.is_set():
+                    return
+
+            current_socket = self._websocket
+            threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
+            from elevenlabslib.ElevenLabsVoice import _NumpyStreamer
+            streamer: _NumpyStreamer
+            streamer = _NumpyStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+
+            mainThread = threading.Thread(target=streamer.begin_streaming)
+            mainThread.start()
+
+            audio_queue_future.set_result(streamer.destination_queue)
+            transcript_queue_future.set_result(streamer.transcript_queue)
+
+            mainThread.join()
+            current_socket.close_socket()
+
 
 def run_ai_speech_classifier(audioBytes:bytes):
     """
