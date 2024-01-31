@@ -5,13 +5,12 @@
 ```python
 from elevenlabslib import *
 
-api_key = "api_key"
-user = ElevenLabsUser(api_key)
-premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
 
 #Generate the audio and get the bytes and historyID. 
 #The GenerationOptions specified here only apply for this generation.
-generationData = premadeVoice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True), GenerationOptions(stability=0.4))
+generationData = voice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True), GenerationOptions(stability=0.4))
 
 #Save them to disk, in ogg format (can be any format supported by SoundFile)
 save_audio_v2(generationData[0], "testAudio.ogg", outputFormat="ogg")
@@ -21,6 +20,22 @@ historyItem = user.get_history_item(generationData[1])
 
 #Delete it
 historyItem.delete()
+```
+
+## Apply effects to audio as it's being played back
+```python
+from elevenlabslib import *
+import numpy
+
+user = ElevenLabsUser("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+#For this example, we turn up the gain by 5x.
+def increase_gain(audio_chunk, sample_rate):
+    return numpy.clip(audio_chunk*5, -1.0, 1.0)
+
+voice.generate_stream_audio_v2("This audio will have its volume increased.",
+                               playbackOptions=PlaybackOptions(audioPostProcessor=increase_gain))
 ```
 
 ## Use ReusableInputStreamer for lower latency websocket streaming
