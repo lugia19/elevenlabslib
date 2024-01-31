@@ -565,21 +565,26 @@ class ReusableInputStreamer:
 
             current_socket = self._websocket
             threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
-            from elevenlabslib.ElevenLabsVoice import _Mp3Streamer, _RAWStreamer
-            streamer: Union[_Mp3Streamer, _RAWStreamer]
 
+            from elevenlabslib.ElevenLabsVoice import _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker
+            streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _Mp3Streamer(playbackOptions, current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
             else:
-                streamer = _RAWStreamer(playbackOptions, current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyRAWStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
 
-            mainThread = threading.Thread(target=streamer.begin_streaming, args=(stream_future,))
-            mainThread.start()
-
-            self._currentStream = stream_future.result(timeout=60)
             transcript_future.set_result(streamer.transcript_queue)
 
-            mainThread.join()
+            player = _NumpyPlaybacker(streamer.destination_queue, playbackOptions, self._currentGenOptions)
+            streaming_thread = threading.Thread(target=streamer.begin_streaming)
+            playback_thread = threading.Thread(target=player.begin_playback, args=(stream_future,))
+            streaming_thread.start()
+            playback_thread.start()
+
+            self._currentStream = stream_future.result(timeout=60)
+
+            streaming_thread.join()
+            playback_thread.join()
             current_socket.close_socket()
 
 class ReusableInputStreamerNoPlayback:
@@ -696,17 +701,16 @@ class ReusableInputStreamerNoPlayback:
 
             current_socket = self._websocket
             threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
-            from elevenlabslib.ElevenLabsVoice import _NumpyStreamer
-            streamer: _NumpyStreamer
-            streamer = _NumpyStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
-
-            mainThread = threading.Thread(target=streamer.begin_streaming)
-            mainThread.start()
+            from elevenlabslib.ElevenLabsVoice import _NumpyMp3Streamer, _NumpyRAWStreamer
+            streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
+            if "mp3" in self._currentGenOptions.output_format:
+                streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+            else:
+                streamer = _NumpyRAWStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
 
             audio_queue_future.set_result(streamer.destination_queue)
             transcript_queue_future.set_result(streamer.transcript_queue)
-
-            mainThread.join()
+            streamer.begin_streaming()
             current_socket.close_socket()
 
 
