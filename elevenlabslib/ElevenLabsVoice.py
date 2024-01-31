@@ -1421,7 +1421,7 @@ class _NumpyPlaybacker:
 
         self._onPlaybackStart = playbackOptions.onPlaybackStart
         self._onPlaybackEnd = playbackOptions.onPlaybackEnd
-
+        self._audioPostProcessor = playbackOptions.audioPostProcessor
         self._deviceID = playbackOptions.portaudioDeviceID or sd.default.device
         self._channels = 1
         self._sample_rate = int(generationOptions.output_format.split("_")[1])
@@ -1462,7 +1462,9 @@ class _NumpyPlaybacker:
                     logging.error("Could not get an item within the timeout (after the playback began). This could lead to audio issues.")
                 continue
                     # raise sd.CallbackAbort
-        # We've read an item from the queue.
+        # We've read an item from the queue - process it.
+        logging.debug("Applying postprocessing to audio...")
+        readData = self._audioPostProcessor(readData, self._sample_rate)
         if not self._playback_start_fired.is_set():  # Ensure the callback only fires once.
             self._playback_start_fired.set()
             logging.debug("Firing onPlaybackStart...")

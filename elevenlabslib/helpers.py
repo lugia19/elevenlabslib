@@ -14,6 +14,7 @@ from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, Asy
 from warnings import warn
 
 import numpy
+import numpy as np
 import sounddevice
 import sounddevice as sd
 import soundfile
@@ -132,11 +133,13 @@ class PlaybackOptions:
         portaudioDeviceID (int, optional): The ID of the audio device to use for playback. Defaults to the default output device.
         onPlaybackStart (Callable, optional): Function to call once the playback begins.
         onPlaybackEnd (Callable, optional): Function to call once the playback ends.
+        audioPostProcessor (Callable, optional): Function to apply post-processing to the audio. Must take a float32 ndarray (of arbitrary length) and an int (the sample rate) as input and return another float32 ndarray.
     """
     runInBackground: bool = False
     portaudioDeviceID: Optional[int] = None
     onPlaybackStart: Callable[[], Any] = lambda: None
     onPlaybackEnd: Callable[[], Any] = lambda: None
+    audioPostProcessor: Callable[[np.ndarray, int], np.ndarray] = lambda x, y : x
 
 @dataclasses.dataclass
 class GenerationOptions:
@@ -935,7 +938,7 @@ class _SDPlaybackWrapper:
         if isinstance(audioData, bytes):
             soundFile = _open_soundfile(audioData, audioFormat)
             soundFile.seek(0)
-            self.data = soundFile.read(always_2d=True)
+            self.data:np.ndarray = soundFile.read(always_2d=True)
             channels = soundFile.channels
         else:
             shape = audioData.shape
@@ -943,7 +946,9 @@ class _SDPlaybackWrapper:
                 channels = 1
             elif len(shape) == 2:
                 channels = shape[1]
-            self.data = audioData.reshape(-1, channels)
+            self.data:np.ndarray = audioData.reshape(-1, channels)
+
+        self.data = playbackOptions.audioPostProcessor(self.data, samplerate)
 
         self.onPlaybackStart = playbackOptions.onPlaybackStart
         self.onPlaybackEnd = playbackOptions.onPlaybackEnd
