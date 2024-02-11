@@ -822,35 +822,6 @@ def _set_websocket_buffer_amount(websocket_options:WebsocketOptions, generation_
                 websocket_options.buffer_char_length = 150
     return websocket_options
 
-#This is to work around an issue. May god have mercy on my soul.
-class BodgedSoundFile(sf.SoundFile):
-    def buffer_read(self, frames=-1, dtype=None):
-        from _soundfile import ffi as _ffi
-        frames = self._check_frames(frames, fill_value=None)
-        ctype = self._check_dtype(dtype)
-        cdata = _ffi.new(ctype + '[]', frames * self.channels)
-        read_frames = self._cdata_io('read', cdata, ctype, frames)
-        assert read_frames == frames, _ffi.buffer(cdata)    #Return read data as exception.args[0]
-        return _ffi.buffer(cdata)
-
-    def read(self, frames=-1, dtype='float64', always_2d=False,
-             fill_value=None, out=None):
-
-        if out is None:
-            frames = self._check_frames(frames, fill_value)
-            out = self._create_empty_array(frames, always_2d, dtype)
-        else:
-            if frames < 0 or frames > len(out):
-                frames = len(out)
-        frames = self._array_io('read', out, frames)
-        if len(out) > frames:
-            if fill_value is None:
-                out = out[:frames]
-            else:
-                out[frames:] = fill_value
-        return out
-
-
 class _AudioStreamer:
     def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
@@ -1107,7 +1078,7 @@ class _NumpyMp3Streamer(_AudioStreamer):
         self._audio_length = 0
 
         self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
+        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
         self._bytesLock = threading.Lock()
 
     def _stream_downloader_function(self):
@@ -1118,91 +1089,40 @@ class _NumpyMp3Streamer(_AudioStreamer):
         super()._stream_downloader_function_websockets()
         self._events["blockDataAvailable"].set()    #This call only happens once the download is entirely complete.
 
-    #TODO: Figure out if this is still required. Also refactor all this lol.
-    def _assertionerror_workaround(self, dataToRead:int=-1, dtype=None, preReadFramePos=-1, preReadBytesPos=-1) -> np.ndarray:
-        # The bug happened, so we must be at a point in the file where the reading fails.
-        logging.debug("The following is some logging for a new and fun soundfile bug, which I (poorly) worked around. Lovely.")
-        logging.debug(f"Before the bug: frame {preReadFramePos} (byte {preReadBytesPos})")
-        logging.debug(f"After the bug: frame {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()})")
 
-        # Release the lock on the underlying BytesIO to allow the download thread to download a bit more of the file.
-        self._bytesLock.release()
-        if not self._events["downloadDoneEvent"].is_set():
-            # Wait for the next block to be downloaded.
-            logging.debug("Fun bug happened before the download was over. Waiting for blockDataAvailable.")
-            self._events["blockDataAvailable"].clear()
-            self._events["blockDataAvailable"].wait()
-        else:
-            # Wait.
-            logging.debug("Fun bug happened AFTER the download was over. Continue.")
-        self._bytesLock.acquire()
-
-        # Let's seek back and re-create the SoundFile, so that we're sure it's fully synched up.
-        self._bytesFile.seek(0)
-        newSF = BodgedSoundFile(self._bytesFile, mode="r")
-        newSF.seek(preReadFramePos)
-        del self._bytesSoundFile
-        self._bytesSoundFile = newSF
-        new_bytes_pos = self._bytesFile.tell()
-        logging.debug(f"Done recreating, now at {self._bytesSoundFile.tell()} (byte {self._bytesFile.tell()}).")
-        if self.last_recreated_pos == new_bytes_pos and self._events["downloadDoneEvent"].is_set():
-            #If the bug happens twice, at the same spot, once hte file is fully downloaded, just assume it's broken.
-            raise RuntimeError("File is looping at the end.")
-        else:
-            self.last_recreated_pos = new_bytes_pos
-        # Try reading the data again. If it works, good.
-        try:
-            readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
-        except (AssertionError, soundfile.LibsndfileError) as ea:
-            # If it fails, get the partial data from the exception args.
-            readData = ea.args[0]
-        return readData
-
-    def _soundFile_read_and_fix(self, dataToRead:int=-1, dtype=None) -> np.ndarray:
-        if dtype is None:
-            dtype = self._dtype
+    #Func assumes it has lock
+    def _sf_read_and_wait(self, dataToRead:int=-1) -> np.ndarray:
         preReadFramePos = self._bytesSoundFile.tell()
-        preReadBytesPos = self._bytesFile.tell()
+        readData = self._bytesSoundFile.read(dataToRead, dtype=self._dtype)
 
-        try:
-            readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
-        except (AssertionError, soundfile.LibsndfileError):
-            #The bug happened, so we must be at a point in the file where the reading fails.
-            readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
-
-
-        #This is the handling for the bug that's described in the rest of the issue. Irrelevant to this new one.
-        if dataToRead != len(readData):
-            logging.debug(f"Expected {dataToRead} bytes, but got back {len(readData)}")
+        # This is the handling for the bug.
         if len(readData) < dataToRead:
-            logging.debug("Insufficient data read.")
-
+            logging.debug(f"Expected {dataToRead} bytes, but got back {len(readData)}")
+            logging.debug("Insufficient data read. Check if we're at the end of the file.")
             curPos = self._bytesFile.tell()
             endPos = self._bytesFile.seek(0, os.SEEK_END)
             if curPos != endPos:
                 logging.debug("We're not at the end of the file. Check if we're out of frames.")
                 logging.debug("Recreating soundfile...")
                 logging.debug(f"preReadFramePos: {preReadFramePos}")
-                self._bytesFile.seek(0)
-                newSF = BodgedSoundFile(self._bytesFile, mode="r")
-                logging.debug(f"postReadFramePos (before recreate): {self._bytesSoundFile.tell()}")
 
+                self._bytesFile.seek(0)
+                newSF = sf.SoundFile(self._bytesFile, mode="r")
+
+                logging.debug(f"postReadFramePos (before recreate): {self._bytesSoundFile.tell()}")
                 newSF.seek(self._bytesSoundFile.tell() - int(len(readData)))
 
                 self._bytesLock.release()
                 if not self._events["downloadDoneEvent"].is_set():
-                    # Wait for the next block to be downloaded.
                     logging.debug("Numpy bug happened before download is over. Waiting for blockDataAvailable.")
                     self._events["blockDataAvailable"].clear()
                     self._events["blockDataAvailable"].wait()
                 else:
-                    #Bug happened once the file was wholly downloaded.
                     logging.debug("Numpy bug happened after download is over. Sleeping.")
                     time.sleep(0.1)
                 self._bytesLock.acquire()
 
                 newSF.seek(newSF.tell())
-
                 frame_diff = newSF.frames - self._bytesSoundFile.frames
                 if frame_diff > 0:
                     logging.debug(f"Frame counter was outdated by {frame_diff}.")
@@ -1210,28 +1130,26 @@ class _NumpyMp3Streamer(_AudioStreamer):
                     self._bytesSoundFile = newSF
                     del old_soundfile
 
-                    preReadFramePos = self._bytesSoundFile.tell()
-                    preReadBytesPos = self._bytesFile.tell()
-
-                    try:
-                        readData = self._bytesSoundFile.read(dataToRead, dtype=dtype)
-                    except (AssertionError, soundfile.LibsndfileError):
-                        readData = self._assertionerror_workaround(dataToRead, dtype, preReadFramePos, preReadBytesPos)
+                    readData = self._bytesSoundFile.read(dataToRead, dtype=self._dtype)
                     logging.debug("Now read " + str(len(readData)) +
                           " bytes. I sure hope that number isn't zero.")
                 else:
+                    logging.error(f"Frame counter was not outdated. What? This shouldn't happen.")
                     del newSF
+            else:
+                logging.debug("We are at the end. Nothing to do.")
         return readData.reshape(-1, self.channels)
 
     def _get_data_from_download_thread(self) -> np.ndarray:
         self._events["blockDataAvailable"].wait()  # Wait until a block of data is available.
         self._bytesLock.acquire()
-        readData = self._soundFile_read_and_fix(_playbackBlockSize)
 
+        readData = self._sf_read_and_wait(_playbackBlockSize)
+
+        #Now we seek back and forth to figure out how much "unread" data we have available.
         currentPos = self._bytesFile.tell()
         self._bytesFile.seek(0, os.SEEK_END)
         endPos = self._bytesFile.tell()
-        #logging.debug("Remaining file length: " + str(endPos - currentPos) + "\n")
         self._bytesFile.seek(currentPos)
         remainingBytes = endPos - currentPos
 
@@ -1246,7 +1164,7 @@ class _NumpyMp3Streamer(_AudioStreamer):
 
     def begin_streaming(self):
         self._bytesFile = io.BytesIO()
-        self._bytesSoundFile: Optional[BodgedSoundFile] = None  # Needs to be created later.
+        self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
 
 
         if isinstance(self.connection, requests.Response):
@@ -1261,7 +1179,7 @@ class _NumpyMp3Streamer(_AudioStreamer):
             logging.debug("Header maybe ready?")
             try:
                 with self._bytesLock:
-                    self._bytesSoundFile = BodgedSoundFile(self._bytesFile)
+                    self._bytesSoundFile = sf.SoundFile(self._bytesFile)
                     logging.debug("File created (" + str(self._bytesFile.tell()) + " bytes read).")
                     self._events["soundFileReadyEvent"].set()
                     break
@@ -1276,7 +1194,6 @@ class _NumpyMp3Streamer(_AudioStreamer):
         while True:
             try:
                 data = self._get_data_from_download_thread()
-                # if self._start_frame is not None:
 
                 with self._bytesLock:
                     original_data_length = len(data)
