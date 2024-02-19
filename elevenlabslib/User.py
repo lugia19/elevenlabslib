@@ -10,21 +10,21 @@ from warnings import warn
 
 from fuzzywuzzy import process
 
-from elevenlabslib.ElevenLabsModel import ElevenLabsModel
-from elevenlabslib.ElevenLabsVoice import ElevenLabsClonedVoice, ElevenLabsProfessionalVoice
-from elevenlabslib.ElevenLabsVoice import ElevenLabsEditableVoice
-from elevenlabslib.ElevenLabsVoice import ElevenLabsDesignedVoice
+from elevenlabslib.Model import Model
+from elevenlabslib.Voice import ClonedVoice, ProfessionalVoice, LibraryVoiceData
+from elevenlabslib.Voice import EditableVoice
+from elevenlabslib.Voice import DesignedVoice
 
 
 if TYPE_CHECKING:
-    from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
-    from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+    from elevenlabslib.HistoryItem import HistoryItem
+    from elevenlabslib.Voice import Voice
 
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PeekQueue
 
 
-class ElevenLabsUser:
+class User:
     """
     Represents a user of the ElevenLabs API, including subscription information.
 
@@ -32,7 +32,7 @@ class ElevenLabsUser:
     """
     def __init__(self, xi_api_key:str):
         """
-        Initializes a new instance of the ElevenLabsUser class.
+        Initializes a new instance of the User class.
 
         Args:
             xi_api_key (str): The user's API key.
@@ -140,29 +140,29 @@ class ElevenLabsUser:
         userData = response.json()
         return userData
 
-    def get_models(self) -> list[ElevenLabsModel]:
+    def get_models(self) -> list[Model]:
         """
-        This function returns all the available models for this account as ElevenLabsModel.
+        This function returns all the available models for this account as Model.
 
         Returns:
-            list[ElevenLabsModel]: All the available models for this account, as ElevenLabsModel instances.
+            list[Model]: All the available models for this account, as Model instances.
         """
         modelList = list()
         response = _api_get("/models", self._headers)
         modelDataList = response.json()
         for modelData in modelDataList:
-            modelList.append(ElevenLabsModel(modelData, self))
+            modelList.append(Model(modelData, self))
         return modelList
 
-    def get_model_by_id(self, modelID:str) -> ElevenLabsModel:
+    def get_model_by_id(self, modelID:str) -> Model:
         response = _api_get("/models", self._headers)
         modelDataList = response.json()
         for modelData in modelDataList:
             if modelData["model_id"] == modelID:
-                return ElevenLabsModel(modelData, self)
+                return Model(modelData, self)
         raise ValueError("This model does not exist or is not available for your account.")
 
-    def get_all_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
+    def get_all_voices(self) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
         """
         Gets a list of all voices registered to this account.
 
@@ -171,38 +171,38 @@ class ElevenLabsUser:
             Use get_available_voices if you only need the currently useable ones.
 
         Returns:
-            list[ElevenLabsVoice]: A list containing all the voices.
+            list[Voice]: A list containing all the voices.
         """
         response = _api_get("/voices", headers=self._headers)
-        allVoices: list[ElevenLabsVoice] = list()
+        allVoices: list[Voice] = list()
         voicesData = response.json()
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        from elevenlabslib.Voice import Voice
         for voiceData in voicesData["voices"]:
-            allVoices.append(ElevenLabsVoice.voiceFactory(voiceData, self))
+            allVoices.append(Voice.voiceFactory(voiceData, self))
         return allVoices
 
-    def get_available_voices(self) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
+    def get_available_voices(self) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
         """
         Gets a list of voices this account can currently use for TTS.
 
         Returns:
-            list[ElevenLabsVoice]: A list of currently usable voices.
+            list[Voice]: A list of currently usable voices.
         """
         response = _api_get("/voices", headers=self._headers)
         voicesData = response.json()
         availableVoices = list()
         canUseClonedVoices = self.get_voice_clone_available()
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        from elevenlabslib.Voice import Voice
         for voiceData in voicesData["voices"]:
             if voiceData["category"] == "cloned" and not canUseClonedVoices:
                 continue
             if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "fine_tuned":
                 continue
-            availableVoices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
+            availableVoices.append(Voice.voiceFactory(voiceData, linkedUser=self))
 
         return availableVoices
 
-    def get_voice_by_ID(self, voiceID: str) -> ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice:
+    def get_voice_by_ID(self, voiceID: str) -> Voice | DesignedVoice | ClonedVoice | ProfessionalVoice:
         """
         Gets a specific voice by ID.
 
@@ -210,19 +210,19 @@ class ElevenLabsUser:
             voiceID (str): The ID of the voice to get.
 
         Returns:
-            ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice|ElevenLabsProfessionalVoice: The requested voice.
+            Voice|DesignedVoice|ClonedVoice|ProfessionalVoice: The requested voice.
         """
         response = _api_get("/voices/" + voiceID, headers=self._headers, params={"with_settings":True})
         voiceData = response.json()
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
-        return ElevenLabsVoice.voiceFactory(voiceData, self)
+        from elevenlabslib.Voice import Voice
+        return Voice.voiceFactory(voiceData, self)
 
-    def get_voices_by_name(self, voiceName: str) -> list[ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
+    def get_voices_by_name(self, voiceName: str) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
         warn("This function is deprecated. Please use get_voices_by_name_v2() instead, which uses fuzzy matching.", DeprecationWarning)
         matches = self.get_voices_by_name_v2(voiceName, score_threshold=100)
         return matches
 
-    def get_voices_by_name_v2(self, voiceName: str, score_threshold:int=75) -> list[ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice]:
+    def get_voices_by_name_v2(self, voiceName: str, score_threshold:int=75) -> list[Voice | EditableVoice | ClonedVoice | ProfessionalVoice]:
         """
         Gets a list of voices with the given name.
 
@@ -234,12 +234,12 @@ class ElevenLabsUser:
             score_threshold (int, Optional): The % chance of a voice being a match required for it to be included in the returned list. Defaults to 75%.
 
         Returns:
-            list[ElevenLabsVoice|ElevenLabsDesignedVoice|ElevenLabsClonedVoice]: A list of matching voices.
+            list[Voice|DesignedVoice|ClonedVoice]: A list of matching voices.
         """
         response = _api_get("/voices", headers=self._headers)
         voicesData = response.json()
 
-        from elevenlabslib.ElevenLabsVoice import ElevenLabsVoice
+        from elevenlabslib.Voice import Voice
         list_of_voices = voicesData["voices"]
         all_matches = process.extract({"name":voiceName}, list_of_voices, limit=None, processor=lambda x: x.get("name"))
 
@@ -247,30 +247,30 @@ class ElevenLabsUser:
         filtered_matches = [match for match in all_matches if match[1] >= score_threshold]
         matching_voices = list()
         for voiceData, score in filtered_matches:
-            matching_voices.append(ElevenLabsVoice.voiceFactory(voiceData, linkedUser=self))
+            matching_voices.append(Voice.voiceFactory(voiceData, linkedUser=self))
         return matching_voices
 
-    def get_history_items(self) -> list[ElevenLabsHistoryItem]:
+    def get_history_items(self) -> list[HistoryItem]:
         warn("This function is deprecated. Please use get_history_items_paginated() instead, which uses pagination.", DeprecationWarning)
         return self.get_history_items_paginated(maxNumberOfItems=-1)
 
 
-    def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem:str|ElevenLabsHistoryItem=None) -> list[ElevenLabsHistoryItem]:
+    def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem: str | HistoryItem=None) -> list[HistoryItem]:
         """
         This function returns numberOfItems history items, starting from the newest (or the one specified with startAfterHistoryItem) and returning older ones.
 
         Args:
             maxNumberOfItems (int): The maximum number of history items to get. A value of 0 or less means all of them.
-            startAfterHistoryItem (str|ElevenLabsHistoryItem): The history item (or its ID) from which to start returning items.
+            startAfterHistoryItem (str|HistoryItem): The history item (or its ID) from which to start returning items.
         Returns:
-            list[ElevenLabsHistoryItem]: A list containing the requested history items.
+            list[HistoryItem]: A list containing the requested history items.
         """
 
-        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
+        from elevenlabslib.HistoryItem import HistoryItem
         params = {}
 
         if startAfterHistoryItem is not None:
-            if isinstance(startAfterHistoryItem, ElevenLabsHistoryItem):
+            if isinstance(startAfterHistoryItem, HistoryItem):
                 startAfterHistoryItem = startAfterHistoryItem.historyID
             params["start_after_history_item_id"] = startAfterHistoryItem
 
@@ -287,7 +287,7 @@ class ElevenLabsUser:
             response = _api_get("/history", headers=self._headers, params=params)
             historyData = response.json()
             for value in historyData["history"]:
-                outputList.append(ElevenLabsHistoryItem(value, self))
+                outputList.append(HistoryItem(value, self))
             #We got back at most singleRequestLimit items.
             params["start_after_history_item_id"] = historyData["last_history_item_id"]
 
@@ -301,32 +301,32 @@ class ElevenLabsUser:
         historyData = response.json()
 
         for value in historyData["history"]:
-            outputList.append(ElevenLabsHistoryItem(value, self))
+            outputList.append(HistoryItem(value, self))
         return outputList
 
 
-    def get_history_item(self, historyItemID) -> ElevenLabsHistoryItem:
+    def get_history_item(self, historyItemID) -> HistoryItem:
         """
         Args:
             historyItemID: The HistoryItem ID.
 
         Returns:
-            ElevenLabsHistoryItem: The corresponding ElevenLabsHistoryItem
+            HistoryItem: The corresponding HistoryItem
         """
         response = _api_get(f"/history/{historyItemID}", headers=self._headers)
         historyData = response.json()
-        from elevenlabslib.ElevenLabsHistoryItem import ElevenLabsHistoryItem
-        return ElevenLabsHistoryItem(historyData, self)
+        from elevenlabslib.HistoryItem import HistoryItem
+        return HistoryItem(historyData, self)
 
-    def download_history_items_v2(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[ElevenLabsHistoryItem, tuple[bytes, str]]:
+    def download_history_items_v2(self, historyItems:list[str | HistoryItem]) -> dict[HistoryItem, tuple[bytes, str]]:
         """
-        Download multiple history items and return a dictionary where the key is the ElevenLabsHistoryItem and the value is a tuple consisting of the bytes of the audio and its filename.
+        Download multiple history items and return a dictionary where the key is the HistoryItem and the value is a tuple consisting of the bytes of the audio and its filename.
 
         Args:
-            historyItems (list[str|ElevenLabsHistoryItem]): List of history items (or their IDs) to download.
+            historyItems (list[str|HistoryItem]): List of history items (or their IDs) to download.
 
         Returns:
-            dict[ElevenLabsHistoryItem, bytes]: Dictionary where the key is the historyItem and the value is a tuple of the bytes of the mp3 file and its filename.
+            dict[HistoryItem, bytes]: Dictionary where the key is the historyItem and the value is a tuple of the bytes of the mp3 file and its filename.
         """
 
         historyItemIDs = list()
@@ -364,7 +364,7 @@ class ElevenLabsUser:
 
         return downloadedHistoryItems
 
-    def download_history_items(self, historyItems:list[str|ElevenLabsHistoryItem]) -> dict[str, bytes]:
+    def download_history_items(self, historyItems:list[str | HistoryItem]) -> dict[str, bytes]:
         warn("This function is deprecated, please use download_history_items_v2 instead.", DeprecationWarning)
         historyItemIDs = list()
         for item in historyItems:
@@ -419,7 +419,7 @@ class ElevenLabsUser:
 
         return response.headers["generated_voice_id"], response.content
 
-    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple[str, bytes]], voiceName:str, voiceDescription:str = "") -> ElevenLabsDesignedVoice:
+    def save_designed_voice(self, temporaryVoiceID: Union[str, tuple[str, bytes]], voiceName:str, voiceDescription:str = "") -> DesignedVoice:
         """
             Saves a voice generated via design_voice to your account, with the given name.
 
@@ -429,7 +429,7 @@ class ElevenLabsUser:
                 voiceDescription (str): The description you would like to give to the new voice.
 
             Returns:
-                ElevenLabsDesignedVoice: The newly created voice
+                DesignedVoice: The newly created voice
         """
         if temporaryVoiceID is tuple:
             temporaryVoiceID = temporaryVoiceID[0]
@@ -443,16 +443,16 @@ class ElevenLabsUser:
         return self.get_voice_by_ID(response.json()["voice_id"])
 
 
-    def clone_voice_by_path(self, name:str, samples: list[str]|str) -> ElevenLabsClonedVoice:
+    def clone_voice_by_path(self, name:str, samples: list[str]|str) -> ClonedVoice:
         """
-            Create a new ElevenLabsClonedVoice object by providing the voice name and a list of sample file paths.
+            Create a new ClonedVoice object by providing the voice name and a list of sample file paths.
 
             Args:
                 name (str): Name of the voice to be created.
                 samples (list[str]|str): List of file paths for the voice samples (or a single path).
 
             Returns:
-                ElevenLabsClonedVoice: The new voice.
+                ClonedVoice: The new voice.
         """
         if isinstance(samples, str):
             samples = list(samples)
@@ -466,16 +466,16 @@ class ElevenLabsUser:
             sampleBytes[fileName] = open(samplePath, "rb").read()
         return self.clone_voice_bytes(name, sampleBytes)
 
-    def clone_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ElevenLabsClonedVoice:
+    def clone_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ClonedVoice:
         """
-            Create a new ElevenLabsGeneratedVoice object by providing the voice name and a dictionary of sample file names and bytes.
+            Create a new GeneratedVoice object by providing the voice name and a dictionary of sample file names and bytes.
 
             Args:
                 name (str): Name of the voice to be created.
                 samples (dict[str, bytes]): Dictionary of sample file names and bytes for the voice samples.
 
             Returns:
-                ElevenLabsClonedVoice: The new voice.
+                ClonedVoice: The new voice.
             """
         if len(samples.keys()) == 0:
             raise Exception("Please add at least one sample!")
@@ -489,7 +489,89 @@ class ElevenLabsUser:
         response = _api_multipart("/voices/add", self._headers, data=payload, filesData=files)
         return self.get_voice_by_ID(response.json()["voice_id"])
 
-    def add_shared_voice_from_URL(self, shareURL:str, newName:str) -> ElevenLabsDesignedVoice:
+    def search_voice_library(self, search_term: str=None, use_cases: list[str]=None, descriptives: list[str]=None, sort: Optional[LibSort]=LibSort.TRENDING, advanced_filters: LibVoiceInfo=LibVoiceInfo(), starting_page=0, query_page_size=30) -> List[LibraryVoiceData]:
+        """
+        Allows you to search the voice library with various filters. For parameters which are lists, all voices that match at least one of them will be returned.
+
+        Args:
+            search_term (str, Optional): The search term to use, equivalent to typing it into the site.
+            use_cases (list, Optional): A list of use cases.
+            descriptives (list, Optional): A list of descriptives (Soft, Calm, etc).
+            sort (LibSort, Optional): How to sort the voices.
+            advanced_filters (LibVoiceInfo, Optional): Allows you to filter voices based on its characteristics (language, accent, etc)
+            query_page_size (int, Optional): How many voices to return. Defaults to 30.
+            starting_page (int, Optional): The page to start at.
+        """
+
+        requested_items = query_page_size
+        query_page_size = min(requested_items, 500)
+        current_page = starting_page
+
+        if starting_page != 0 and advanced_filters and advanced_filters.language:
+            requested_items = (starting_page + 1) * query_page_size
+            current_page = 0
+
+        has_more = True
+        all_lib_voices = []
+
+        while has_more and len(all_lib_voices) < requested_items:
+            query_params = {
+                'search': search_term,
+                'use_cases': ','.join(use_cases) if use_cases else None,
+                'descriptives': ','.join(descriptives) if descriptives else None,
+                'sort': sort.value if sort else None,
+                'page_size': query_page_size,
+                'page': current_page,
+            }
+
+            query_params.update(advanced_filters.to_query_params())
+            query_params = {k: v for k, v in query_params.items() if v is not None}
+
+            response = _api_get("/shared-voices", self._headers, params=query_params)
+            all_data = response.json()
+
+            # Update has_more based on the API response
+            has_more = all_data.get("has_more", False)
+            voices_data = all_data.get("voices", [])
+            lib_voices = [LibraryVoiceData(voice_data) for voice_data in voices_data]
+
+            # Filter by language if necessary
+            if advanced_filters.language:
+                lib_voices = [voice for voice in lib_voices if voice.speaker_info.language == advanced_filters.language]
+
+            all_lib_voices.extend(lib_voices)
+
+            # Prepare for the next iteration/page
+            current_page += 1
+
+        if starting_page != 0 and advanced_filters.language:
+            start_index = starting_page * query_page_size
+
+            if len(all_lib_voices) < start_index:
+                # If we have fewer items than the start index, return an empty list
+                return []
+            else:
+                # Calculate the end index based on the smaller of either the requested_items or the length of all_lib_voices
+                end_index = min(len(all_lib_voices), requested_items)
+                # Trim the list to start from the correct offset and contain only the number of items available up to the end_index
+                return all_lib_voices[start_index:end_index]
+        else:
+            return all_lib_voices[:requested_items]
+
+    def add_shared_voice(self, voice:LibraryVoiceData, newName:str) -> Voice:
+        """
+        Adds a voice from the library to your account.
+
+        Args:
+            voice (LibraryVoiceData): A LibraryVoiceData object, from the voice library endpoint.
+            newName (str): Name to give to the voice.
+
+        Returns:
+            Voice: The newly created voice.
+        """
+        return self.add_shared_voice_from_URL(voice.share_link, newName)
+
+    def add_shared_voice_from_URL(self, shareURL:str, newName:str) -> Voice:
         """
         Adds a voice from a share link to the account.
 
@@ -498,7 +580,7 @@ class ElevenLabsUser:
             newName (str): Name to give to the voice.
 
         Returns:
-            ElevenLabsDesignedVoice: The newly created voice.
+            Voice: The newly created voice.
         """
         userIDStartIndex = shareURL.index("/voice-lab/share/") + len("/voice-lab/share/")
         voiceIDStartIndex = shareURL.index("/", userIDStartIndex)
@@ -509,7 +591,7 @@ class ElevenLabsUser:
 
         return self.add_shared_voice_from_info(publicUserID, voiceID, newName)
 
-    def add_shared_voice_from_info(self, publicUserID:str, voiceID:str, newName:str) -> ElevenLabsDesignedVoice:
+    def add_shared_voice_from_info(self, publicUserID:str, voiceID:str, newName:str) -> Voice:
         """
         Adds a voice directly from the voiceID and the public userID.
 
@@ -519,7 +601,7 @@ class ElevenLabsUser:
             newName (str): Name to give to the voice.
 
         Returns:
-            ElevenLabsDesignedVoice: The newly created voice.
+            Voice: The newly created voice.
         """
         payload = {"new_name":newName}
         try:
@@ -527,9 +609,11 @@ class ElevenLabsUser:
             newVoiceID = response.json()["voice_id"]
             return self.get_voice_by_ID(newVoiceID)
         except requests.exceptions.RequestException as e:
-            if e.response.json()["detail"]["status"] == "voice_already_cloned":
+            if e.response.json()["detail"]["status"] == "voice_already_exists":
                 raise ValueError(f"You've already added the voice {voiceID} to your account!")
             raise e
+
+
 
     def update_audio_quality(self):
         self._subscriptionTier = self.get_subscription_data()["tier"]
@@ -558,3 +642,9 @@ class ElevenLabsUser:
                     generationOptions.output_format = "pcm_24000"
 
         return generationOptions
+
+
+class ElevenLabsUser(User):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use User instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)

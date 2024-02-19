@@ -4,7 +4,7 @@ from concurrent.futures import Future
 import dataclasses
 import inspect
 import io
-import json
+from enum import Enum
 import logging
 import queue
 import threading
@@ -12,7 +12,7 @@ import time
 import zlib
 from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple
 from warnings import warn
-
+import json
 import numpy
 import numpy as np
 import sounddevice
@@ -24,8 +24,8 @@ import os
 
 import websockets.sync.client
 
-from elevenlabslib import ElevenLabsVoice
-from elevenlabslib.ElevenLabsModel import ElevenLabsModel
+from elevenlabslib import Voice
+from elevenlabslib.Model import Model
 
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
@@ -54,6 +54,85 @@ model_shorthands = {
     "eleven_monolingual_v1": "e1",
     "eleven_turbo_v2": "t2"
 }
+
+class LibCategory(Enum):
+    PROFESSIONAL = "professional"
+    VOICE_DESIGN = "generated"
+    NONE = None
+
+    def _missing_(self, value=None):
+        return LibCategory.NONE
+
+
+class LibGender(Enum):
+    MALE = "male"
+    FEMALE = "female"
+    NEUTRAL = "neutral"
+    NONE = None
+
+    def _missing_(self, value=None):
+        return LibGender.NONE
+
+class LibAge(Enum):
+    YOUNG = "young"
+    MIDDLE_AGED = "middle_aged"
+    OLD = "old"
+    NONE = None
+
+    def _missing_(self, value=None):
+        return LibAge.NONE
+
+class LibAccent(Enum):
+    BRITISH = "british"
+    AMERICAN = "american"
+    AFRICAN = "african"
+    AUSTRALIAN = "australian"
+    INDIAN = "indian"
+    NONE = None
+
+    def _missing_(self, value=None):
+        return LibAccent.NONE
+
+class LibVoiceInfo:
+    """
+    Contains the information for a voice in the Voice Library.
+    """
+    def __init__(self, category: LibCategory = None, gender: LibGender = None, age: LibAge = None, accent: LibAccent = None, language: str = None):
+        """
+        Initializes an instance.
+
+        Parameters:
+            category (LibCategory, optional): Whether the voice is generated or a professional clone
+            gender (LibGender, optional): The gender of the voice
+            age (LibAge, optional): The age of the voice
+            accent (LibAccent, optional): The accent of the voice
+            language (str, optional): The language of the voice, as a language code.
+        """
+        self.category = category
+        self.gender = gender
+        self.age = age
+        self.accent = accent
+        self.language = language
+
+    def to_query_params(self):
+        """
+        Converts filter attributes to a dictionary of query parameters, omitting None values.
+        """
+        params = {
+            'category': self.category.value if self.category else None,
+            'gender': self.gender.value if self.gender else None,
+            'age': self.age.value if self.age else None,
+            'accent': self.accent.value if self.accent else None,
+            'language': self.language,
+        }
+        # Filter out None values
+        return {k: v for k, v in params.items() if v is not None}
+
+class LibSort(Enum):
+    TRENDING = "usage_character_count_7d"
+    LATEST = "created_date"
+    MOST_USERS = "cloned_by_count"
+    MOST_CHARACTERS_GENERATED = "usage_character_count_1y"
 
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]
@@ -148,7 +227,7 @@ class GenerationOptions:
     If any option besides model_id and latencyOptimizationLevel is omitted, the stored value associated with the voice is used.
 
     Parameters:
-        model (ElevenLabsModel|str, optional): The TTS model (or its ID) to use for the generation. Defaults to monolingual english v1.
+        model (Model|str, optional): The TTS model (or its ID) to use for the generation. Defaults to monolingual english v1.
         latencyOptimizationLevel (int, optional): The level of latency optimization (0-4) to apply. Defaults to 0.
         stability (float, optional): A float between 0 and 1 representing the stability of the generated audio. If omitted, the current stability setting is used.
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.
@@ -177,7 +256,7 @@ class GenerationOptions:
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
-    model: Optional[Union[ElevenLabsModel, str]] = "eleven_monolingual_v1"
+    model: Optional[Union[Model, str]] = "eleven_monolingual_v1"
     output_format:str = "mp3_highest"
     forced_pronunciations:Optional[dict] = None
 
@@ -358,11 +437,11 @@ class Synthesizer:
         if defaultPromptingOptions is not None:
             self._defaultPromptOptions = defaultPromptingOptions
 
-    def add_to_queue(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None, promptingOptions:PromptingOptions=None) -> None:
+    def add_to_queue(self, voice:Voice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None, promptingOptions:PromptingOptions=None) -> None:
         """
         Adds an item to the synthesizer queue.
         Parameters:
-            voice (ElevenLabsVoice): The voice that will speak the prompt
+            voice (Voice): The voice that will speak the prompt
             prompt (str): The prompt to be spoken
             generationOptions (GenerationOptions, optional): Overrides the generation options for this generation
             playbackOptions (PlaybackOptions, optional): Overrides the playback options for this generation
@@ -392,7 +471,7 @@ class Synthesizer:
             logging.debug(f"Synthesizing prompt: {prompt}")
             self._generate_events_and_begin(voice, prompt, genOptions, playOptions, promptOptions)
 
-    def _generate_events_and_begin(self, voice:ElevenLabsVoice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions, promptingOptions:PromptingOptions):
+    def _generate_events_and_begin(self, voice:Voice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions, promptingOptions:PromptingOptions):
         newEvent = threading.Event()
 
         def startcallbackfunc():
@@ -437,7 +516,7 @@ class ReusableInputStreamer:
     """
     This is basically a reusable wrapper around a websocket connection.
     """
-    def __init__(self, voice:ElevenLabsVoice,
+    def __init__(self, voice:Voice,
                  defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
                  generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
                  websocketOptions:WebsocketOptions=WebsocketOptions()
@@ -459,7 +538,7 @@ class ReusableInputStreamer:
         self._ping_thread.start()
         threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
 
-    def change_voice(self, voice:ElevenLabsVoice):
+    def change_voice(self, voice:Voice):
         self._voice = voice
         self._renew_socket()
     def stop(self):
@@ -569,7 +648,7 @@ class ReusableInputStreamer:
             current_socket = self._websocket
             threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
 
-            from elevenlabslib.ElevenLabsVoice import _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker
+            from elevenlabslib.Voice import _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker
             streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
             if "mp3" in self._currentGenOptions.output_format:
                 streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
@@ -594,7 +673,7 @@ class ReusableInputStreamerNoPlayback:
     """
     This is basically a reusable wrapper around a websocket connection.
     """
-    def __init__(self, voice:ElevenLabsVoice,
+    def __init__(self, voice:Voice,
                  generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
                  websocketOptions:WebsocketOptions=WebsocketOptions()
                  ):
@@ -613,7 +692,7 @@ class ReusableInputStreamerNoPlayback:
         self._ping_thread.start()
         threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
 
-    def change_voice(self, voice:ElevenLabsVoice):
+    def change_voice(self, voice:Voice):
         self._voice = voice
         self._renew_socket()
     def stop(self):
@@ -704,7 +783,7 @@ class ReusableInputStreamerNoPlayback:
 
             current_socket = self._websocket
             threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
-            from elevenlabslib.ElevenLabsVoice import _NumpyMp3Streamer, _NumpyRAWStreamer
+            from elevenlabslib.Voice import _NumpyMp3Streamer, _NumpyRAWStreamer
             streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
             if "mp3" in self._currentGenOptions.output_format:
                 streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)

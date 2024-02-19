@@ -4,28 +4,28 @@ from datetime import datetime
 
 import requests
 
-from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+from elevenlabslib.User import User
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _audio_is_raw
 
-class ElevenLabsHistoryItem:
+class HistoryItem:
     """
     Represents a previously generated audio.
 
     Tip:
-        There is no method to get an ElevenLabsVoice object for the voice that was used to create the file as it may not exist anymore.
+        There is no method to get an Voice object for the voice that was used to create the file as it may not exist anymore.
         You can use the voiceID for that.
     """
 
-    def __init__(self, data:dict, parentUser:ElevenLabsUser):
+    def __init__(self, data:dict, parentUser:User):
         """
-        Initializes a new instance of the ElevenLabsHistoryItem class.
+        Initializes a new instance of the HistoryItem class.
 
         Args:
         	data: a dictionary containing information about the history item
-        	parentUser: an instance of ElevenLabsUser class representing the user that generated it
+        	parentUser: an instance of User class representing the user that generated it
         """
-        self._parentUser:ElevenLabsUser = parentUser
+        self._parentUser:User = parentUser
         self._historyID = data["history_item_id"]
         self._voiceId = data["voice_id"]
         self._voiceName = data["voice_name"]
@@ -76,7 +76,7 @@ class ElevenLabsHistoryItem:
     @property
     def parentUser(self):
         """
-        The ElevenLabsUser object for the user that generated this item.
+        The User object for the user that generated this item.
         """
         return self._parentUser
 
@@ -179,7 +179,7 @@ class ElevenLabsHistoryItem:
             The history currently saves PCM generations directly, without any header data.
             Since the samplerate isn't saved either, you'll basically just need to guess which samplerate it is if trying to play it back.
         Caution:
-            If you're looking to download multiple history items, use ElevenLabsUser.download_history_items() instead.
+            If you're looking to download multiple history items, use User.download_history_items() instead.
             That will call a different endpoint, optimized for multiple downloads.
 
         Returns:
@@ -285,3 +285,7 @@ class ElevenLabsHistoryItem:
 
 
 
+class ElevenLabsHistoryItem(HistoryItem):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use HistoryItem instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)

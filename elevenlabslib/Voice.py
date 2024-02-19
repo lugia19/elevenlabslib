@@ -14,8 +14,8 @@ import websockets
 from websockets.sync.client import connect
 
 if TYPE_CHECKING:
-    from elevenlabslib.ElevenLabsSample import ElevenLabsSample
-    from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+    from elevenlabslib.Sample import Sample
+    from elevenlabslib.User import User
 
 from elevenlabslib.helpers import *
 from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
@@ -23,7 +23,7 @@ from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart,
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
 _downloadChunkSize = 4096
-class ElevenLabsVoice:
+class Voice:
     """
     Represents a voice in the ElevenLabs API.
 
@@ -50,37 +50,37 @@ class ElevenLabsVoice:
             _downloadChunkSize = downloadChunkSize
 
     @staticmethod
-    def voiceFactory(voiceData, linkedUser: ElevenLabsUser) -> ElevenLabsVoice | ElevenLabsEditableVoice | ElevenLabsClonedVoice | ElevenLabsProfessionalVoice:
+    def voiceFactory(voiceData, linkedUser: User) -> Voice | EditableVoice | ClonedVoice | ProfessionalVoice:
         """
-        Initializes a new instance of ElevenLabsVoice or one of its subclasses depending on voiceData.
+        Initializes a new instance of Voice or one of its subclasses depending on voiceData.
 
         Args:
             voiceData: A dictionary containing the voice data.
-            linkedUser: An instance of the ElevenLabsUser class representing the linked user.
+            linkedUser: An instance of the User class representing the linked user.
 
         Returns:
-            ElevenLabsVoice | ElevenLabsDesignedVoice | ElevenLabsClonedVoice: The voice object
+            Voice | DesignedVoice | ClonedVoice: The voice object
         """
         category = voiceData["category"]
         if category == "premade":
-            return ElevenLabsVoice(voiceData, linkedUser)
+            return Voice(voiceData, linkedUser)
         elif category == "cloned":
-            return ElevenLabsClonedVoice(voiceData, linkedUser)
+            return ClonedVoice(voiceData, linkedUser)
         elif category == "generated":
-            return ElevenLabsDesignedVoice(voiceData, linkedUser)
+            return DesignedVoice(voiceData, linkedUser)
         elif category == "professional":
-            return ElevenLabsProfessionalVoice(voiceData, linkedUser)
+            return ProfessionalVoice(voiceData, linkedUser)
         else:
             raise ValueError(f"{category} is not a valid voice category!")
 
-    def __init__(self, voiceData, linkedUser:ElevenLabsUser):
+    def __init__(self, voiceData, linkedUser:User):
         """
-        Initializes a new instance of the ElevenLabsVoice class.
+        Initializes a new instance of the Voice class.
         Don't use this constructor directly. Use the factory instead.
 
         Args:
             voiceData: A dictionary containing the voice data.
-            linkedUser: An instance of the ElevenLabsUser class representing the linked user.
+            linkedUser: An instance of the User class representing the linked user.
         """
         self._linkedUser = linkedUser
         # This is the name at the time the object was created. It won't be updated.
@@ -95,7 +95,6 @@ class ElevenLabsVoice:
 
     def get_settings(self) -> dict:
         warn("The new method is to use the properties combined with update_data(). See the guide at https://elevenlabslib.readthedocs.io.", DeprecationWarning)
-
         return self.update_data()["settings"]
 
     def update_data(self) -> dict:
@@ -150,13 +149,13 @@ class ElevenLabsVoice:
         The user currently linked to the voice, whose API key will be used to generate audio.
 
         Returns:
-            ElevenLabsUser: The user linked to the voice.
+            User: The user linked to the voice.
 
         """
         return self._linkedUser
 
     @linkedUser.setter
-    def linkedUser(self, newUser: ElevenLabsUser):
+    def linkedUser(self, newUser: User):
         """
         Set the user linked to the voice, whose API key will be used.
 
@@ -164,7 +163,7 @@ class ElevenLabsVoice:
             Only supported for premade voices, as others do not have consistent IDs.
 
         Args:
-            newUser (ElevenLabsUser): The new user to link to the voice.
+            newUser (User): The new user to link to the voice.
 
         """
         if self.category != "premade":
@@ -647,11 +646,11 @@ class ElevenLabsVoice:
         return play_audio_v2(self.get_preview_bytes(), playbackOptions)
 
 
-class ElevenLabsEditableVoice(ElevenLabsVoice):
+class EditableVoice(Voice):
     """
     This class is shared by all the voices which can have their details edited and be deleted from an account.
     """
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+    def __init__(self, voiceData, linkedUser: User):
         super().__init__(voiceData, linkedUser)
 
 
@@ -688,11 +687,11 @@ class ElevenLabsEditableVoice(ElevenLabsVoice):
         response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
         self._voiceID = ""
 
-class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
+class DesignedVoice(EditableVoice):
     """
     Represents a voice created via voice design.
     """
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+    def __init__(self, voiceData, linkedUser: User):
         super().__init__(voiceData, linkedUser)
 
     def get_share_link(self) -> str:
@@ -712,51 +711,51 @@ class ElevenLabsDesignedVoice(ElevenLabsEditableVoice):
         publicOwnerID = sharingData["public_owner_id"]
         originalVoiceID = sharingData["original_voice_id"]
 
-        return f"https://beta.elevenlabs.io/voice-lab/share/{publicOwnerID}/{originalVoiceID}"
+        return f"https://elevenlabs.io/voice-lab/share/{publicOwnerID}/{originalVoiceID}"
 
-class ElevenLabsProfessionalVoice(ElevenLabsEditableVoice):
+class ProfessionalVoice(EditableVoice):
     """
     Represents a voice created via professional voice cloning.
     """
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+    def __init__(self, voiceData, linkedUser: User):
         super().__init__(voiceData, linkedUser)
 
-    def get_samples(self) -> list[ElevenLabsSample]:
+    def get_samples(self) -> list[Sample]:
         """
         Caution:
             There is an API bug here. The /voices/voiceID endpoint does not correctly return sample data for professional cloning voices.
 
         Returns:
-            list[ElevenLabsSample]: The samples that make up this professional voice clone.
+            list[Sample]: The samples that make up this professional voice clone.
         """
         outputList = list()
         samplesData = self.update_data()["samples"]
-        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
+        from elevenlabslib.Sample import Sample
         for sampleData in samplesData:
-            outputList.append(ElevenLabsSample(sampleData, self))
+            outputList.append(Sample(sampleData, self))
         return outputList
 
-    def get_high_quality_models(self) -> list[ElevenLabsModel]:
+    def get_high_quality_models(self) -> list[Model]:
         return [model for model in self.linkedUser.get_models() if model.modelID in self.update_data()["high_quality_base_model_ids"]]
 
-class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
+class ClonedVoice(EditableVoice):
     """
     Represents a voice created via instant voice cloning.
     """
-    def __init__(self, voiceData, linkedUser: ElevenLabsUser):
+    def __init__(self, voiceData, linkedUser: User):
         super().__init__(voiceData, linkedUser)
 
-    def get_samples(self) -> list[ElevenLabsSample]:
+    def get_samples(self) -> list[Sample]:
         """
         Returns:
-            list[ElevenLabsSample]: The samples that make up this voice clone.
+            list[Sample]: The samples that make up this voice clone.
         """
 
         outputList = list()
         samplesData = self.update_data()["samples"]
-        from elevenlabslib.ElevenLabsSample import ElevenLabsSample
+        from elevenlabslib.Sample import Sample
         for sampleData in samplesData:
-            outputList.append(ElevenLabsSample(sampleData, self))
+            outputList.append(Sample(sampleData, self))
         return outputList
 
     def add_samples_by_path(self, samples:list[str]|str):
@@ -803,6 +802,54 @@ class ElevenLabsClonedVoice(ElevenLabsEditableVoice):
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
 
         _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
+
+class LibraryVoiceData:
+    def __init__(self, lib_voice_data):
+        # Core properties
+        self.share_link = f"https://elevenlabs.io/voice-lab/share/{lib_voice_data.get('public_owner_id')}/{lib_voice_data.get('voice_id')}"
+        self.name = lib_voice_data.get('name')
+        self.description = lib_voice_data.get('description')
+
+        # Speaker information
+        self.speaker_info = LibVoiceInfo(
+            category=LibCategory(lib_voice_data.get('category')),
+            gender=LibGender(lib_voice_data.get('gender')),
+            age=LibAge(lib_voice_data.get('age')),
+            accent=LibAccent(lib_voice_data.get('accent')),
+            language=lib_voice_data.get('language'),
+        )
+
+        # Usage information
+        self.usage_info = {
+            'free_users_allowed': lib_voice_data.get('free_users_allowed'),
+            'live_moderation_enabled': lib_voice_data.get('live_moderation_enabled'),
+            'notice_period': lib_voice_data.get('notice_period'),
+            'use_case': lib_voice_data.get('use_case'),
+            'rate': lib_voice_data.get('rate'),
+        }
+
+        # Library information
+        self.library_info = {
+            'cloned_by_count': lib_voice_data.get('cloned_by_count'),
+            'date_unix': lib_voice_data.get('date_unix'),
+            'descriptive': lib_voice_data.get('descriptive'),  # Assuming this is a detailed description or tags
+            'usage_character_count_1y': lib_voice_data.get('usage_character_count_1y'),
+            'usage_character_count_7d': lib_voice_data.get('usage_character_count_7d'),
+            'preview_url': lib_voice_data.get('preview_url'),
+            'public_owner_id': lib_voice_data.get('public_owner_id'),
+            'voice_id': lib_voice_data.get('voice_id')
+        }
+
+        # Social media information
+        self.social_media = {
+            'instagram': lib_voice_data.get('instagram_username'),
+            'tiktok': lib_voice_data.get('tiktok_username'),
+            'twitter': lib_voice_data.get('twitter_username'),
+            'youtube': lib_voice_data.get('youtube_username'),
+        }
+
+        # Metadata for less frequently accessed or auxiliary information
+        self.all_metadata = lib_voice_data
 
 
 
@@ -1398,3 +1445,30 @@ class _NumpyPlaybacker:
             logging.debug("Callback got empty data from the queue.")
         else:
             outdata[:] = readData
+
+
+class ElevenLabsVoice(Voice):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use Voice instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)
+
+class ElevenLabsEditableVoice(EditableVoice):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use EditableVoice instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)
+
+
+class ElevenLabsDesignedVoice(DesignedVoice):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use DesignedVoice instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)
+
+class ElevenLabsProfessionalVoice(ProfessionalVoice):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use ProfessionalVoice instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)
+
+class ElevenLabsClonedVoice(ClonedVoice):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use ClonedVoice instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)

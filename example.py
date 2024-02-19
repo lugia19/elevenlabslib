@@ -25,7 +25,7 @@ def main():
     #logging.basicConfig(level=logging.DEBUG)
 
     #Create the user object
-    user = ElevenLabsUser(apiKey)
+    user = User(apiKey)
 
     #Delete voices if they already exist
     try:
@@ -164,7 +164,7 @@ def main():
 
     #Get one of the premade voices:
     #NOTE: get_voices_by_name returns a list of voices that match that name (since multiple voices can have the same name).
-    premadeVoice:ElevenLabsVoice = user.get_voices_by_name("Rachel")[0]
+    premadeVoice:Voice = user.get_voices_by_name("Rachel")[0]
     try:
         #Playback in normal mode, waiting for the whole file to be downloaded before playing it back, on a specific device.
         premadeVoice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False, portaudioDeviceID=sounddevice.default.device))
@@ -195,7 +195,7 @@ def main():
         print("Couldn't generate an output, likely out of tokens.")
 
     #Let's change which API key we use to generate samples with this voice
-    newUser = ElevenLabsUser(apiKey2)
+    newUser = User(apiKey2)
     premadeVoice.linkedUser = newUser
 
     try:

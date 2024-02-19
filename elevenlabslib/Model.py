@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from warnings import warn
 
 if TYPE_CHECKING:
-    from elevenlabslib.ElevenLabsUser import ElevenLabsUser
+    from elevenlabslib.User import User
 
-class ElevenLabsModel:
+class Model:
     """
     Represents a TTS/Voice Conversion model, as accessible by a user.
     """
-    def __init__(self, modelData, linkedUser: ElevenLabsUser):
+    def __init__(self, modelData, linkedUser: User):
         self._linkedUser = linkedUser
 
         self._name = modelData["name"]
@@ -94,3 +95,8 @@ class ElevenLabsModel:
                 "name":language["name"]
             })
         return languageList
+
+class ElevenLabsModel(Model):
+    def __init__(self, *args, **kwargs):
+        warn("This name is deprecated and will be removed in future versions. Use Model instead.", DeprecationWarning)
+        super().__init__(*args, **kwargs)

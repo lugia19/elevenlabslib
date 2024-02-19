@@ -37,7 +37,7 @@ Here is a very simple usage sample.
 ```py
 from elevenlabslib import *
 
-user = ElevenLabsUser("API_KEY")
+user = User("API_KEY")
 voice = user.get_voices_by_name_v2("Rachel")[0]  # This is a list because multiple voices can have the same name
 
 voice.generate_play_audio_v2("Test.", playbackOptions=PlaybackOptions(runInBackground=False))

@@ -1,14 +1,25 @@
-from .ElevenLabsUser import ElevenLabsUser
-from .ElevenLabsVoice import ElevenLabsVoice, ElevenLabsDesignedVoice
-from .ElevenLabsVoice import ElevenLabsEditableVoice
-from .ElevenLabsVoice import ElevenLabsClonedVoice
-from .ElevenLabsVoice import ElevenLabsProfessionalVoice
-from .ElevenLabsSample import ElevenLabsSample
-from .ElevenLabsHistoryItem import ElevenLabsHistoryItem
-from .helpers import GenerationOptions, PlaybackOptions, run_ai_speech_classifier, play_audio_bytes_v2, save_audio_bytes, WebsocketOptions, pcm_to_wav, Synthesizer, ulaw_to_wav, save_audio_v2, \
-    play_audio_v2, PromptingOptions, ReusableInputStreamer, ReusableInputStreamerNoPlayback
+from .User import User, ElevenLabsUser
+from .Voice import Voice, ElevenLabsVoice
+from .Voice import ElevenLabsDesignedVoice, DesignedVoice
+from .Voice import ElevenLabsEditableVoice, EditableVoice
+from .Voice import ElevenLabsClonedVoice, ClonedVoice
+from .Voice import ElevenLabsProfessionalVoice, ProfessionalVoice
+from .Voice import LibraryVoiceData
+from .Sample import Sample, ElevenLabsSample
+from .HistoryItem import HistoryItem, ElevenLabsHistoryItem
+from .Model import Model, ElevenLabsModel
+from .helpers import GenerationOptions, PlaybackOptions, run_ai_speech_classifier, WebsocketOptions, Synthesizer, save_audio_v2, \
+    PromptingOptions, ReusableInputStreamer, ReusableInputStreamerNoPlayback
 
-__all__ = ["ElevenLabsUser", "ElevenLabsVoice","ElevenLabsClonedVoice","ElevenLabsDesignedVoice", "ElevenLabsEditableVoice",
-           "ElevenLabsProfessionalVoice", "ElevenLabsSample", "ElevenLabsHistoryItem", "ElevenLabsModel", "GenerationOptions", "PlaybackOptions", "WebsocketOptions", "PromptingOptions",
-           "run_ai_speech_classifier","play_audio_bytes_v2","play_audio_v2","save_audio_bytes", "save_audio_v2", "pcm_to_wav", "ulaw_to_wav", "Synthesizer", "ReusableInputStreamer", "ReusableInputStreamerNoPlayback"]
-
+__all__ = ["ElevenLabsUser","User",
+           "ElevenLabsVoice", "Voice",
+           "ElevenLabsClonedVoice", "ClonedVoice",
+           "ElevenLabsDesignedVoice", "DesignedVoice",
+           "ElevenLabsEditableVoice", "EditableVoice",
+           "ElevenLabsProfessionalVoice", "ProfessionalVoice",
+           "Sample", "ElevenLabsSample",
+           "HistoryItem", "ElevenLabsHistoryItem",
+           "Model", "ElevenLabsModel",
+           "LibraryVoiceData",
+           "GenerationOptions", "PlaybackOptions", "WebsocketOptions", "PromptingOptions",
+           "run_ai_speech_classifier", "save_audio_v2", "Synthesizer", "ReusableInputStreamer", "ReusableInputStreamerNoPlayback"]
