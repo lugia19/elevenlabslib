@@ -38,6 +38,7 @@ class HistoryItem:
         self._settingsUsed = data["settings"]
         self._fullMetadata = data
         self._audioData = None
+        self._source = data["source"]
 
     @property
     def metadata(self):
@@ -108,6 +109,13 @@ class HistoryItem:
         return self._text
 
     @property
+    def source(self):
+        """
+        Whether the item was generated using TTS or STS.
+        """
+        return self._source
+
+    @property
     def characterCountChangeFrom(self):
         return self._characterCountChangeFrom
 
@@ -155,8 +163,8 @@ class HistoryItem:
         if "v2" in genSettings.model_id:
             settings_string += f"_se{round(genSettings.style*100)}{'_b' if genSettings.use_speaker_boost else ''}"
 
-        model_string = model_shorthands.get(genSettings.model_id)
-        filename = f"ElevenLabs_{date_string}T{time_string}_{self.voiceName}_{category_string}_{settings_string}_{model_string}"
+        model_string = model_shorthands.get(genSettings.model_id, None)
+        filename = f"ElevenLabs_{date_string}T{time_string}_{self.voiceName}_{category_string}_{settings_string}{'_'+model_string if model_string else ''}"
 
         #This is just here to be implemented in the future. Right now, both PCM and mp3 audio get a .mp3 extension on the API.
         #TODO: Change this once it's fixed.
