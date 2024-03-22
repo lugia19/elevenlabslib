@@ -364,6 +364,14 @@ class PromptingOptions:
         elif self.close_quote_duration_multiplier > 1:
             raise ValueError("Please input a valid value for last_character_duration_multiplier (between 0 and 1).")
 
+@dataclasses.dataclass
+class GenerationInfo:
+    """
+    This contains the information returned regarding a (non-websocket) generation.
+    """
+    history_item_id: Optional[str] = None
+    request_id: Optional[str] = None
+    tts_latency_ms: Optional[str] = None
 
 class Synthesizer:
     """
@@ -1019,6 +1027,7 @@ class _SDPlaybackWrapper:
             soundFile.seek(0)
             self.data:np.ndarray = soundFile.read(always_2d=True)
             channels = soundFile.channels
+            samplerate = soundFile.samplerate   #Just in case soundfile disagrees on the samplerate.
         else:
             shape = audioData.shape
             if len(shape) == 1:
