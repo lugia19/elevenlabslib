@@ -318,43 +318,6 @@ class Voice:
 
         return websocket, generationOptions
 
-    def generate_to_historyID_v2(self, prompt: Union[str,bytes,BinaryIO], generationOptions:GenerationOptions=None) -> str:
-        """
-        Generate audio bytes from the given prompt and returns the historyItemID corresponding to it.
-
-        Parameters:
-            prompt (str, bytes, BinaryIO): The text prompt or audio bytes/file pointer to generate audio from.
-            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
-        Returns:
-            The ID for the new HistoryItem
-        """
-        if generationOptions is None:
-            generationOptions = GenerationOptions()
-
-        payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
-        params = self._generate_parameters(generationOptions)
-
-        if not isinstance(prompt, str):
-            if "output_format" in params:
-                params.pop("output_format")
-            source_audio, prompt = io_hash_from_audio(prompt)
-
-            files = {"audio": source_audio}
-
-            requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, data=payload, params=params, filesData=files)
-        else:
-            requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, stream=True, params=params)
-
-
-        generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-        response = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-
-        if "history-item-id" in response.headers:
-            history_id = response.headers["history-item-id"]
-        else:
-            history_id = "no_history_id_available"
-        return history_id
-
     def _generate_audio_prompting(self, prompt:str, generationOptions:GenerationOptions, promptingOptions:PromptingOptions):
         """
         Internal use only, just wraps stream_audio_no_playback.
@@ -379,29 +342,30 @@ class Voice:
         audioData = final_audio.read()
         return audioData
 
-    def generate_audio_v2(self, prompt: Union[str,bytes, BinaryIO], generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str]:
+    def generate_audio_v3(self, prompt: Union[str,bytes, BinaryIO], generation_options:GenerationOptions=GenerationOptions(), prompting_options:PromptingOptions=None) -> \
+            tuple[Future[bytes], Optional[GenerationInfo]]:
         """
-        Generates speech for the given prompt or audio and returns the audio data as bytes of an mp3 file alongside the new historyID.
+        Generates speech for the given prompt or audio and returns the audio data as bytes of a file alongside the new historyID.
 
         Tip:
             If you would like to save the audio to disk or otherwise, you can use helpers.save_audio_bytes().
 
         Args:
             prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate speech for.
-            generationOptions (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
-            promptingOptions (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
+            generation_options (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
+            prompting_options (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
         Returns:
-            A tuple consisting of the bytes of the audio file and its historyID.
+            tuple[Future[bytes], Optional[GenerationInfo]]:
+            - A future object that will contain the bytes of the audio file once the generation is complete.
+            - An optional GenerationInfo object.
 
         Note:
             If using PCM as the output_format, the return audio bytes are a WAV.
         """
+        generation_options = self.linkedUser.get_real_audio_format(generation_options)
 
-        #Since we need the sample rate directly, make sure it's a real one.
-        generationOptions = self.linkedUser.get_real_audio_format(generationOptions)
-
-        payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
-        params = self._generate_parameters(generationOptions)
+        payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
+        params = self._generate_parameters(generation_options)
         if isinstance(prompt, str):
             requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         else:
@@ -413,62 +377,36 @@ class Voice:
 
             requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, data=payload, params=params, filesData=files)
 
-        if isinstance(prompt,str) and promptingOptions is not None:
-            audioData = self._generate_audio_prompting(prompt, generationOptions, promptingOptions)
-            history_id = "no_history_id_available"
+        audio_future = concurrent.futures.Future()
+
+        if isinstance(prompt,str) and prompting_options is not None:
+            def wrapped():
+                audioData = self._generate_audio_prompting(prompt, generation_options, prompting_options)
+                audio_future.set_result(audioData)
+            threading.Thread(target=wrapped).start()
+            return audio_future, None
         else:
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-            audioData = responseConnection.content
+            def wrapped():
+                audioData = responseConnection.content
+                if "output_format" in params:
+                    if "pcm" in params["output_format"]:
+                        audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
+                    if "ulaw" in params["output_format"]:
+                        audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
 
-            if "output_format" in params:
-                if "pcm" in params["output_format"]:
-                    audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
-                if "ulaw" in params["output_format"]:
-                    audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
+                audio_future.set_result(audioData)
 
-            if "history-item-id" in responseConnection.headers:
-                history_id = responseConnection.headers["history-item-id"]
-            else:
-                history_id = "no_history_id_available"
-
-        return audioData, history_id
-
-    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str, sd.OutputStream]:
-        """
-        Generate audio bytes from the given prompt and play them using sounddevice.
-
-        Tip:
-            This function downloads the entire file before playing it back, and even if playInBackground is set, it will halt execution until the file is downloaded.
-            If you need faster response times and background downloading and playback, use generate_and_stream_audio_v2.
-
-        Parameters:
-            prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate audio from.
-            playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
-            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
-            promptingOptions (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
-
-        Returns:
-           A tuple consisting of the bytes of the audio file, its historyID and the sounddevice OutputStream, to allow you to pause/stop the playback early.
-
-        Note:
-            If using PCM as the output_format, the return audio bytes are a WAV.
-        """
-        if generationOptions is None:
-            generationOptions = GenerationOptions()
-        generationOptions = self._complete_generation_options(generationOptions)
-
-        audioData, historyID = self.generate_audio_v2(prompt, generationOptions, promptingOptions)
-        outputStream = play_audio_v2(audioData, playbackOptions, self._linkedUser.get_real_audio_format(generationOptions).output_format)
-
-        return audioData, historyID, outputStream
-
-
-
+            threading.Thread(target=wrapped).start()
+            response_headers = responseConnection.headers
+            return audio_future, GenerationInfo(history_item_id=response_headers.get("history-item-id"),
+                                                request_id=response_headers.get("request-id"),
+                                                tts_latency_ms=response_headers.get("tts-latency-ms"))
 
     def _setup_streamer(self, prompt:Union[str, Iterator[str], Iterator[dict], bytes, BinaryIO],
-                                 generationOptions:GenerationOptions=GenerationOptions(), websocketOptions:WebsocketOptions=WebsocketOptions(),
-                                 promptingOptions:PromptingOptions=None) -> Union[_NumpyMp3Streamer, _NumpyRAWStreamer]:
+                        generation_options:GenerationOptions=GenerationOptions(), websocket_options:WebsocketOptions=WebsocketOptions(),
+                        prompting_options:PromptingOptions=None) -> Union[_NumpyMp3Streamer, _NumpyRAWStreamer]:
         """
         Internal use only - sets up and returns a _NumpyStreamer of the correct type, which will stream the audio data.
         """
@@ -476,35 +414,35 @@ class Voice:
         is_sts = False  # This is just a bodge.
 
         # We need the real sample rate.
-        generationOptions = self._complete_generation_options(generationOptions)
+        generation_options = self._complete_generation_options(generation_options)
 
-        if isinstance(prompt, str) and promptingOptions is not None:
+        if isinstance(prompt, str) and prompting_options is not None:
             original_prompt = prompt
 
             def write():
                 for _ in range(1):
-                    yield f'{promptingOptions.pre_prompt} "{original_prompt}" {promptingOptions.post_prompt}'
+                    yield f'{prompting_options.pre_prompt} "{original_prompt}" {prompting_options.post_prompt}'
 
             prompt = write()
-            websocketOptions = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
+            websocket_options = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
         else:
-            promptingOptions = None  # Ignore them if not generating a normal string.
+            prompting_options = None  # Ignore them if not generating a normal string.
 
-        if isinstance(prompt, str) and promptingOptions is None:
-            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
+        if isinstance(prompt, str) and prompting_options is None:
+            payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             # Not using input streaming
-            params = self._generate_parameters(generationOptions)
+            params = self._generate_parameters(generation_options)
             requestFunction = lambda: requests.post(api_endpoint + path, headers=self._linkedUser.headers, json=payload, stream=True,
                                                     params=params, timeout=requests_timeout)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
             is_sts = True
-            payload, generationOptions = self._generate_payload_and_options(prompt, generationOptions)
+            payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
             path = "/speech-to-speech/" + self._voiceID + "/stream"
             # Using speech to speech
-            params = self._generate_parameters(generationOptions)
+            params = self._generate_parameters(generation_options)
             if "output_format" in params:
                 params.pop("output_format")
 
@@ -516,109 +454,142 @@ class Voice:
                                                     params=params, timeout=requests_timeout, files=files)
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or promptingOptions is not None:
+        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or prompting_options is not None:
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection, generationOptions = self._generate_websocket_and_options(websocketOptions, generationOptions)
+            responseConnection, generation_options = self._generate_websocket_and_options(websocket_options, generation_options)
         else:
             raise ValueError("Unknown type passed for prompt.")
 
         streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
 
-        if "mp3" in generationOptions.output_format or is_sts:
-            streamer = _NumpyMp3Streamer(responseConnection, generationOptions, websocketOptions, prompt, promptingOptions)
+        if "mp3" in generation_options.output_format or is_sts:
+            streamer = _NumpyMp3Streamer(responseConnection, generation_options, websocket_options, prompt, prompting_options)
         else:
-            streamer = _NumpyRAWStreamer(responseConnection, generationOptions, websocketOptions, prompt, promptingOptions)
+            streamer = _NumpyRAWStreamer(responseConnection, generation_options, websocket_options, prompt, prompting_options)
 
         return streamer
+
+    def stream_audio_v3(self,
+                        prompt:Union[str, Iterator[str], Iterator[dict], AsyncIterator, bytes, BinaryIO],
+                        playback_options:PlaybackOptions=PlaybackOptions(),
+                        generation_options:GenerationOptions=GenerationOptions(),
+                        websocket_options:WebsocketOptions=WebsocketOptions(),
+                        prompting_options:PromptingOptions=None,
+                        disable_playback:bool = False
+                        ) -> tuple[queue.Queue[numpy.ndarray], Optional[queue.Queue[str]], Optional[Future[sounddevice.OutputStream]], Optional[GenerationInfo]]:
+        """
+        Generate and stream audio from the given prompt (or str iterator).
+
+        Parameters:
+            prompt (str|Iterator[str]|Iterator[dict]|bytes|BinaryIO): The text prompt to generate audio from OR an iterator that returns multiple strings or dicts (for input streaming) OR the bytes/file pointer of an audio file.
+            playback_options (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
+            generation_options (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
+            websocket_options (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
+            prompting_options (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
+            disable_playback (bool, optional): Allows you to disable playback altogether.
+        Returns:
+            tuple[queue.Queue[numpy.ndarray], Optional[queue.Queue[str]], Optional[Future[OutputStream]], Optional[GenerationInfo]]:
+                - A queue containing the numpy audio data as float32 arrays.
+                - An optional queue for audio transcripts, populated if websocket streaming is used.
+                - An optional future for controlling the playback, returned if playback is not disabled.
+                - An optional GenerationInfo object with metadata about the audio generation.
+        """
+
+        generation_options = self._complete_generation_options(generation_options)
+
+        streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer] = self._setup_streamer(prompt, generation_options, websocket_options, prompting_options)
+        audio_stream_future, transcript_queue, generation_info = None, None, None
+
+        if disable_playback:
+            mainThread = threading.Thread(target=streamer.begin_streaming)
+            mainThread.start()
+        else:
+            audio_stream_future = concurrent.futures.Future()
+            old_playback_start = playback_options.onPlaybackStart
+            def playbackStartWrapper():
+                # Wait for the amount of websocket data to be sufficient...
+                streamer._events["websocketDataSufficient"].wait()
+                old_playback_start()
+
+            playback_options = dataclasses.replace(playback_options, onPlaybackStart=playbackStartWrapper)
+
+            player = _NumpyPlaybacker(streamer.playback_queue, playback_options, generation_options)
+            threading.Thread(target=streamer.begin_streaming).start()
+
+            if playback_options.runInBackground:
+                playback_thread = threading.Thread(target=player.begin_playback, args=(audio_stream_future,))
+                playback_thread.start()
+            else:
+                player.begin_playback(audio_stream_future)
+
+        if isinstance(streamer.connection, requests.Response):
+            connection_headers = streamer.connection.headers
+            generation_info = GenerationInfo(history_item_id=connection_headers.get("history-item-id"),
+                           request_id=connection_headers.get("request-id"),
+                           tts_latency_ms=connection_headers.get("tts-latency-ms"))
+        else:
+            transcript_queue = streamer.transcript_queue
+
+        return streamer.userfacing_queue, transcript_queue, audio_stream_future, generation_info
+
+
+
+    #region Deprecated v2 functions
+    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str, sd.OutputStream]:
+        warn("This function is deprecated. Just use generate_audio_v3 combined with play_audio_v2.", DeprecationWarning)
+        if generationOptions is None:
+            generationOptions = GenerationOptions()
+        generationOptions = self._complete_generation_options(generationOptions)
+
+        audioData, historyID = self.generate_audio_v2(prompt, generationOptions, promptingOptions)
+        outputStream = play_audio_v2(audioData, playbackOptions, self._linkedUser.get_real_audio_format(generationOptions).output_format)
+
+        return audioData, historyID, outputStream
+
+    def generate_to_historyID_v2(self, prompt: Union[str, bytes, BinaryIO], generationOptions: GenerationOptions = None) -> str:
+        warn("This function is deprecated. Use generate_audio_v3 instead.", DeprecationWarning)
+        audio_data_future, generation_info = self.generate_audio_v3(prompt, generationOptions)
+
+        if generation_info:
+            return generation_info.history_item_id
+        else:
+            return "no_history_id_available"
+
+    def generate_audio_v2(self, prompt: Union[str, bytes, BinaryIO], generationOptions: GenerationOptions = GenerationOptions(), promptingOptions: PromptingOptions = None) -> tuple[bytes, str]:
+        warn("Deprecated. Use generate_audio_v3 instead.", DeprecationWarning)
+        future, gen_options = self.generate_audio_v3(prompt, generationOptions, promptingOptions)
+        if gen_options:
+            history_id = gen_options.history_item_id
+        else:
+            history_id = "no_history_id_available"
+
+        return future.result(), history_id
 
     def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], Iterator[dict], AsyncIterator, bytes, BinaryIO],
                                  playbackOptions:PlaybackOptions=PlaybackOptions(),
                                  generationOptions:GenerationOptions=GenerationOptions(),
                                  websocketOptions:WebsocketOptions=WebsocketOptions(),
                                  promptingOptions:PromptingOptions=None) -> tuple[str, Future[Any], Optional[queue.Queue]]:
-        """
-        Generate audio bytes from the given prompt (or str iterator) and stream them using sounddevice.
+        warn("This function is deprecated, please use stream_audio_v3 instead.", DeprecationWarning)
 
-        If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
-
-        Warning:
-            Currently, when doing input streaming, the API does not return the history item ID. This function will therefore return None in those cases. I will fix it once it does.
-
-        Parameters:
-            prompt (str|Iterator[str]|Iterator[dict]|bytes|BinaryIO): The text prompt to generate audio from OR an iterator that returns multiple strings or dicts (for input streaming) OR the bytes/file pointer of an audio file.
-            playbackOptions (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
-            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
-            websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
-            promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
-        Returns:
-            A tuple consisting of:
-            -HistoryID for the newly created item
-            -Future which will hold the audio OutputStream (to control playback)
-            -Queue for transcripts, with None as the termination indicator.
-        """
-        generationOptions = self._complete_generation_options(generationOptions)
-
-        streamer:Union[_NumpyMp3Streamer, _NumpyRAWStreamer] = self._setup_streamer(prompt, generationOptions, websocketOptions, promptingOptions)
-        audioStreamFuture = concurrent.futures.Future()
-
-        old_playback_start = playbackOptions.onPlaybackStart
-        def playbackStartWrapper():
-            # Wait for the amount of websocket data to be sufficient...
-            streamer._events["websocketDataSufficient"].wait()
-            old_playback_start()
-        playbackOptions = dataclasses.replace(playbackOptions, onPlaybackStart=playbackStartWrapper)
-
-        player = _NumpyPlaybacker(streamer.destination_queue, playbackOptions, generationOptions)
-        threading.Thread(target=streamer.begin_streaming).start()
-
-        if playbackOptions.runInBackground:
-            playbackThread = threading.Thread(target=player.begin_playback, args=(audioStreamFuture,))
-            playbackThread.start()
-        else:
-            player.begin_playback(audioStreamFuture)
-
+        audio_queue, transcript_queue, audio_future, gen_info = self.stream_audio_v3(prompt, playbackOptions, generationOptions, websocketOptions, promptingOptions, disable_playback=False)
         history_id = "no_history_id_available"
-        transcript_queue = None
-        if isinstance(streamer.connection, requests.Response) and "history-item-id" in streamer.connection.headers:
-            history_id = streamer.connection.headers["history-item-id"]
+        if gen_info:
+            history_id = gen_info.history_item_id
 
-        if isinstance(streamer.connection, websockets.sync.client.ClientConnection):
-            transcript_queue = streamer.transcript_queue
-
-
-        return history_id, audioStreamFuture, transcript_queue
+        return history_id, audio_future, transcript_queue
 
 
     def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], Iterator[dict], bytes, BinaryIO],
                                  generationOptions:GenerationOptions=GenerationOptions(), websocketOptions:WebsocketOptions=WebsocketOptions(),
                                  promptingOptions:PromptingOptions=None) -> (queue.Queue[numpy.ndarray], Optional[queue.Queue[str]]):
-        """
-        Generate audio bytes from the given prompt (or str iterator, with input streaming) and returns the data in a queue, without playback.
+        warn("This function is deprecated, please use stream_audio_v3 with disable_playback set to True instead.", DeprecationWarning)
+        audio_queue, transcript_queue, _, _ = self.stream_audio_v3(prompt, PlaybackOptions(), generationOptions, websocketOptions, promptingOptions, disable_playback=True)
+        return audio_queue, transcript_queue
 
-        If the runInBackground option in PlaybackOptions is true, it will download the audio data in a separate thread, without pausing the main thread.
+    #endregion
 
-        Parameters:
-            prompt (str|Iterator[str]|Iterator[dict]): The text prompt or audio bytes/file pointer to generate audio from OR an iterator that returns multiple strings or dicts (for input streaming).
-            generationOptions (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
-            websocketOptions (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
-            promptingOptions (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
-        Returns:
-            A tuple consisting of:
-            - Queue for the audio as float32 numpy arrays, with None acting as the termination indicator.
-            - Queue for transcripts, with None as the termination indicator (if websocket streaming was used).
-        """
-        generationOptions = self._complete_generation_options(generationOptions)
-
-        streamer = self._setup_streamer(prompt, generationOptions, websocketOptions, promptingOptions)
-
-        mainThread = threading.Thread(target=streamer.begin_streaming)
-        mainThread.start()
-
-        if isinstance(streamer.connection, requests.Response):
-            return streamer.destination_queue, None
-        else:
-            return streamer.destination_queue, streamer.transcript_queue
 
     def get_preview_url(self) -> str|None:
         """
@@ -850,8 +821,6 @@ class LibraryVoiceData:
 
         # Metadata for less frequently accessed or auxiliary information
         self.all_metadata = lib_voice_data
-
-
 
 #This way lies only madness.
 
@@ -1114,7 +1083,8 @@ class _NumpyMp3Streamer(_AudioStreamer):
             "blockDataAvailable": threading.Event()
         })
 
-        self.destination_queue = queue.Queue()
+        self.playback_queue = queue.Queue()
+        self.userfacing_queue = queue.Queue()
 
         self._audio_type = "mp3"
         self._frameSize = 4
@@ -1252,7 +1222,8 @@ class _NumpyMp3Streamer(_AudioStreamer):
 
             if len(data) == _playbackBlockSize:
                 logging.debug("Putting " + str(len(data)) + " bytes in queue.")
-                self.destination_queue.put(data)
+                self.playback_queue.put(data)
+                self.userfacing_queue.put(data)
             else:
                 logging.debug("Got back less data than expected, check if we're at the end...")
                 with self._bytesLock:
@@ -1268,12 +1239,14 @@ class _NumpyMp3Streamer(_AudioStreamer):
                             #              " bytes in queue.")
                             curr_frame = curPos - len(data)
                             data, action = self._cutout_data(curr_frame, data, self._frameSize)
-                            self.destination_queue.put(data)
+                            self.playback_queue.put(data)
+                            self.userfacing_queue.put(data)
                         break
                     else:
                         logging.debug("We're not at the end, yet we recieved less data than expected. This is a bug that was introduced with the update.")
         logging.debug("While loop done.")
-        self.destination_queue.put(None)
+        self.playback_queue.put(None)
+        self.userfacing_queue.put(None)
 
         return
 
@@ -1314,7 +1287,8 @@ class _NumpyRAWStreamer(_AudioStreamer):
         parts = generation_options.output_format.lower().split("_")
         self._subtype = parts[0]
 
-        self.destination_queue = queue.Queue()
+        self.playback_queue = queue.Queue()
+        self.userfacing_queue = queue.Queue()
 
         self._audio_type = "raw"
         self._frameSize = 2
@@ -1333,7 +1307,8 @@ class _NumpyRAWStreamer(_AudioStreamer):
         else:
             self._stream_downloader_function_websockets()
         logging.debug("Stream done - putting None in the queue.")
-        self.destination_queue.put(None)
+        self.playback_queue.put(None)
+        self.userfacing_queue.put(None)
 
         return
 
@@ -1352,9 +1327,11 @@ class _NumpyRAWStreamer(_AudioStreamer):
             audioData = audioData.astype(np.float32)
             audioData /= np.iinfo(np.int16).max
             if action_taken is None or action_taken != "zero":
-                self.destination_queue.put(audioData)
+                self.playback_queue.put(audioData)
+                self.userfacing_queue.put(audioData)
             if action_taken is not None and action_taken == "stop":
-                self.destination_queue.put(None)
+                self.playback_queue.put(None)
+                self.userfacing_queue.put(None)
 
         if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
             audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
@@ -1365,14 +1342,16 @@ class _NumpyRAWStreamer(_AudioStreamer):
             audioData = audioData.astype(np.float32)
             audioData /= np.iinfo(np.int16).max
             if action_taken is None or action_taken != "zero":
-                self.destination_queue.put(audioData)
+                self.playback_queue.put(audioData)
+                self.userfacing_queue.put(audioData)
             # Pad the end of the audio with silence to avoid the looping final chunk.s
             silence_chunk = np.zeros(_playbackBlockSize * self.channels, dtype=self._dtype).reshape(-1, self.channels)
             silence_chunk = silence_chunk.astype(np.float32)
             silence_chunk /= np.iinfo(np.int16).max
             for _ in range(2):
-                self.destination_queue.put(silence_chunk)
-            self.destination_queue.put(None)
+                self.playback_queue.put(silence_chunk)   #We don't add it to the duplicate queue, as this is just a fix for the playback.
+            self.playback_queue.put(None)
+            self.userfacing_queue.put(None)
 
 
 

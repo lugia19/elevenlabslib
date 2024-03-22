@@ -665,7 +665,7 @@ class ReusableInputStreamer:
 
             transcript_future.set_result(streamer.transcript_queue)
 
-            player = _NumpyPlaybacker(streamer.destination_queue, playbackOptions, self._currentGenOptions)
+            player = _NumpyPlaybacker(streamer.playback_queue, playbackOptions, self._currentGenOptions)
             streaming_thread = threading.Thread(target=streamer.begin_streaming)
             playback_thread = threading.Thread(target=player.begin_playback, args=(stream_future,))
             streaming_thread.start()
@@ -798,7 +798,7 @@ class ReusableInputStreamerNoPlayback:
             else:
                 streamer = _NumpyRAWStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
 
-            audio_queue_future.set_result(streamer.destination_queue)
+            audio_queue_future.set_result(streamer.playback_queue)
             transcript_queue_future.set_result(streamer.transcript_queue)
             streamer.begin_streaming()
             current_socket.close_socket()
