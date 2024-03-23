@@ -1089,7 +1089,6 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
                     logging.debug(f"\nOther items are first in queue, waiting for 0.5s\n")
                     time.sleep(0.5)  # The time to peek at the queue is constant.
             except requests.exceptions.RequestException as e:
-                print(generationID)
                 response_json = e.response.json()
                 error_status = response_json["detail"]["status"]
                 if error_status == "too_many_concurrent_requests" or error_status == "system_busy":
@@ -1184,14 +1183,12 @@ def sts_long_audio(source_audio:Union[bytes, BinaryIO], voice:Voice, generation_
 
     #Queue them all up for generation
     for idx, audio_io in enumerate(audio_segments):
-        print(f"Queueing up {idx+1}/{len(audio_segments)}")
         audio_io.seek(0)
         tts_future, _ = voice.generate_audio_v3(audio_io, generation_options=generation_options)
         tts_futures.append(tts_future)
 
     #Get the results
     for idx, tts_future in enumerate(tts_futures):
-        print(f"Getting {idx+1}/{len(tts_futures)}")
         tts_segment = tts_future.result()
         data, samplerate = sf.read(io.BytesIO(tts_segment), dtype="float32")
         tts_segments.append(data)

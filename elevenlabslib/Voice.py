@@ -367,7 +367,6 @@ class Voice:
                 params.pop("output_format")
 
             source_audio, prompt = io_hash_from_audio(prompt)
-            print(prompt)
             files = {"audio": source_audio}
 
             requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream",
