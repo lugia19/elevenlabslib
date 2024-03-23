@@ -18,7 +18,7 @@ _silero_model_lock = threading.Lock()
 class _OnnxWrapper:
     def __init__(self, path, force_onnx_cpu=False):
         import onnxruntime
-
+        onnxruntime.set_default_logger_severity(3)
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
