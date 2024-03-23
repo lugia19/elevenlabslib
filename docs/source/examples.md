@@ -1,26 +1,61 @@
 # Usage examples
 
-## Play back, save and delete a generated audio
+## Generate, play back, save and delete a generated audio
 
+```python
+from elevenlabslib import *
+from elevenlabslib.helpers import play_audio_v2
+user = User("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+
+# Generate the audio and get the bytes and historyID. 
+# The GenerationOptions specified here only apply for this generation.
+audio_future, generation_info_future = voice.generate_audio_v3("This is a test.", GenerationOptions(stability=0.4))
+generation_info = generation_info_future.result()
+audio_data = audio_future.result()
+# Play it back
+play_audio_v2(audio_data)
+
+# Save it to disk, in ogg format (can be any format supported by SoundFile)
+save_audio_v2(audio_data, "testAudio.ogg", outputFormat="ogg")
+
+# Fetch the corresponding historyItem
+historyItem = user.get_history_item(generation_info.history_item_id)
+
+# Delete it
+historyItem.delete()
+```
+
+## Speech to speech on a long file (eg, an audiobook)
+```python
+from elevenlabslib import *
+from elevenlabslib.helpers import *
+
+user = User("YOUR_API_KEY")
+voice = user.get_available_voices()[0]
+source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
+
+converted_audio = sts_long_audio(source_audio_file, voice)
+
+save_audio_v2(converted_audio, r"C:\your\output\location.mp3", "mp3")
+```
+
+
+## Speech to speech
 ```python
 from elevenlabslib import *
 
 user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-# Generate the audio and get the bytes and historyID. 
-# The GenerationOptions specified here only apply for this generation.
-generationData = voice.generate_play_audio_v2("This is a test.", PlaybackOptions(runInBackground=True),
-                                              GenerationOptions(stability=0.4))
+generation_options = GenerationOptions(model_id="eleven_english_sts_v2", stability=0.2)
 
-# Save them to disk, in ogg format (can be any format supported by SoundFile)
-save_audio_v2(generationData[0], "testAudio.ogg", outputFormat="ogg")
+source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
+#sorce_audio can also be bytes, to allow you to pass input from a microphone:
+source_audio_bytes = source_audio_file.read()
 
-# Fetch the corresponding historyItem
-historyItem = user.get_history_item(generationData[1])
-
-# Delete it
-historyItem.delete()
+voice.stream_audio_v3(source_audio_file, generation_options=generation_options)
+voice.stream_audio_v3(source_audio_bytes, generation_options=generation_options)
 ```
 
 ## Search the voice library and add a voice to your account
@@ -57,8 +92,8 @@ def increase_gain(audio_chunk, sample_rate):
     return numpy.clip(audio_chunk * 5, -1.0, 1.0)
 
 
-voice.generate_stream_audio_v2("This audio will have its volume increased.",
-                               playbackOptions=PlaybackOptions(audioPostProcessor=increase_gain))
+voice.stream_audio_v3("This audio will have its volume increased.",
+                      playback_options=PlaybackOptions(audioPostProcessor=increase_gain))
 ```
 
 ## Use ReusableInputStreamer for lower latency websocket streaming
@@ -104,8 +139,8 @@ generation_options = GenerationOptions(stability=0.1)
 prompting_options = PromptingOptions(post_prompt="she shouted angrily.")
 
 #The spoken audio will only contain chosen text, and will cut out the pre/post prompt.
-voice.generate_stream_audio_v2("I've had enough!", generationOptions=generation_options,
-                               promptingOptions=prompting_options)
+voice.stream_audio_v3("I've had enough!", generation_options=generation_options,
+                               prompting_options=prompting_options)
 ```
 
 ## Advanced websocket features: Control amount of buffering and force flush on a specific chunk
@@ -134,10 +169,10 @@ websocket_options = WebsocketOptions(chunk_length_schedule=[125],
                                      buffer_char_length=150)
 
 #This will now work without stuttering, but it will add some extra latency before playback begins.
-voice.generate_stream_audio_v2(write(),
+voice.stream_audio_v3(write(),
                                PlaybackOptions(runInBackground=False),
-                               generationOptions=generation_options,
-                               websocketOptions=websocket_options)
+                               generation_options=generation_options,
+                               websocket_options=websocket_options)
 ```
 
 ## Force the pronunciation of a word
@@ -157,9 +192,9 @@ forced_pronunciations = {
         }
 }
 
-voice.generate_stream_audio_v2("This is a test. Both instances of test will be pronounced as tomato.",
-                               playbackOptions=PlaybackOptions(runInBackground=False),
-                               generationOptions=GenerationOptions(model="eleven_monolingual_v1",
+voice.stream_audio_v3("This is a test. Both instances of test will be pronounced as tomato.",
+                               playback_options=PlaybackOptions(runInBackground=False),
+                               generation_options=GenerationOptions(model="eleven_monolingual_v1",
                                                                    forced_pronunciations=forced_pronunciations))
 
 ```
@@ -174,7 +209,7 @@ user = User(api_key)
 premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
 
 #pcm_highest (and mp3_highest) will automatically select the highest quality available to your account.
-audioData = premadeVoice.generate_audio_v2("This is a test.", GenerationOptions(output_format="pcm_highest"))
+audioData = premadeVoice.generate_audio_v3("This is a test.", GenerationOptions(output_format="pcm_highest"))
 ```
 
 ## Use the Synthesizer utility class to manage playback
@@ -206,25 +241,6 @@ input("We're past the for loop already. Hit enter when you'd like to stop the pl
 synthesizer.stop()
 
 ```
-
-## Speech to speech (no longer works with the api key)
-
-```python
-from elevenlabslib import *
-
-user = User("YOUR_API_KEY")
-voice = user.get_available_voices()[0]
-
-generation_options = GenerationOptions(model_id="eleven_english_sts_v2", stability=0.2)
-
-source_audio_file = open(r"C:\your\audio\file.mp3", "rb")
-#sorce_audio can also be bytes, to allow you to pass input from a microphone:
-source_audio_bytes = source_audio_file.read()
-
-voice.generate_stream_audio_v2(source_audio_file, generationOptions=generation_options)
-voice.generate_stream_audio_v2(source_audio_bytes, generationOptions=generation_options)
-```
-
 
 ## Use input streaming with the OpenAI API
 Adapted from [this example](https://gist.github.com/NN1985/a0712821269259061177c6abb08e8e0a) using the official wrapper.
@@ -261,28 +277,12 @@ text_stream = write("Give me a five sentence response.")
 voice = user.get_available_voices()[0]
 
 # Stream the audio
-# WARNING: The historyID will be "no_history_id_available", due to the API currently not returning it.
-historyID, AudioStreamFuture, transcriptQueue = voice.generate_stream_audio_v2(
+# Note: The last parameter will be None due to the API not giving websocket generations a historyID
+audio_queue, transcript_queue, audio_stream_future, _ = voice.stream_audio_v3(
     text_stream, PlaybackOptions(runInBackground=False),
     GenerationOptions(latencyOptimizationLevel=4),
     WebsocketOptions(try_trigger_generation=True, chunk_length_schedule=[50])
 )
-```
-
-## Generate an audio with the (alpha) V2 english model and its new settings
-
-```python
-from elevenlabslib import *
-
-api_key = "api_key"
-user = User(api_key)
-premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
-
-# Generate and play the audio using the English v2 model.
-playbackOptions = PlaybackOptions(runInBackground=False)
-generationOptions = GenerationOptions(model="eleven_english_v2", stability=0.3, similarity_boost=0.7, style=0.6,
-                                      use_speaker_boost=True)
-premadeVoice.generate_play_audio_v2("This is a test.", playbackOptions, generationOptions)
 ```
 
 ## Control the background playback of an audio
@@ -290,19 +290,20 @@ premadeVoice.generate_play_audio_v2("This is a test.", playbackOptions, generati
 ```python
 import time
 from elevenlabslib import *
+from elevenlabslib.helpers import play_audio_v2
 
-api_key = "api_key"
-user = User(api_key)
-voice = user.get_voices_by_name_v2("Rachel")[0]
+voice = User("api_key").get_available_voices()[0]
 usingStreaming = True
+
 if usingStreaming:
     #The stream function uses a future rather than returing the audioStream directly.
-    audioStreamFuture = voice.generate_stream_audio_v2("I am currently testing the playback control.",
+    _, _, audioStreamFuture, _ = voice.stream_audio_v3("I am currently testing the playback control.",
                                                        PlaybackOptions(runInBackground=True))[1]
     audioStream = audioStreamFuture.result()
 else:
-    audioStream = voice.generate_play_audio_v2("I am currently testing the playback control.", PlaybackOptions(runInBackground=True))[
+    audio_data, _ = voice.generate_audio_v3("I am currently testing the playback control.")[
         1]
+    audioStream = play_audio_v2(audio_data, PlaybackOptions(runInBackground=True))
 
 #Wait for the thread to be active, then stop the playback.
 while not audioStream.active:
@@ -334,7 +335,7 @@ outputDevice = random.choice(outputDevices)
 print(f"Randomly chosen device: {outputDevice['name']}")
 
 #WARNING: Since we're choosing it randomly, it may be invalid and cause errors.
-voice.generate_stream_audio_v2("Device output test.",
+voice.stream_audio_v3("Device output test.",
                                PlaybackOptions(runInBackground=False, portaudioDeviceID=outputDevice["index"]))
 ```
 
@@ -348,30 +349,6 @@ audioBytes = open(filePath, "rb").read()
 
 responseDict = run_ai_speech_classifier(audioBytes)
 print(f"There's a {responseDict['probability'] * 100}% chance that this audio was AI generated.")
-```
-
-## Use the multilingual TTS model
-
-```python
-from elevenlabslib import *
-
-api_key = "api_key"
-user = User(api_key)
-premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
-
-#Find a multilingual model (one that supports a language other than english).
-#We can't just check if it supports more than 1 language as english is split into 4 different types.
-multilingualModel = None
-for model in user.get_models():
-    for language in model.supportedLanguages:
-        if "en" not in language["language_id"]:
-            #Found a model that supports a non-english language
-            multilingualModel = model
-            break
-
-#Note: The model_id can also be directly used.
-premadeVoice.generate_play_audio_v2("Questa è una prova!", PlaybackOptions(runInBackground=False),
-                                    GenerationOptions(model=multilingualModel))
 ```
 
 ## Create and edit a cloned voice
@@ -440,8 +417,8 @@ user = User(api_key)
 
 #Generate two items to be deleted later
 premadeVoice = user.get_voices_by_name_v2("Rachel")[0]
-premadeVoice.generate_audio_v2("Test.")
-premadeVoice.generate_audio_v2("Test.")
+premadeVoice.generate_audio_v3("Test.")
+premadeVoice.generate_audio_v3("Test.")
 
 #Find them, download them then delete them.
 #Note - I'm assuming they're within the last 10 generations, since they were just created.

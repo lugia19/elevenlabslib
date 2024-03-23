@@ -305,7 +305,7 @@ class User:
         return outputList
 
 
-    def get_history_item(self, historyItemID) -> HistoryItem:
+    def get_history_item(self, historyItemID:Union[str, GenerationInfo]) -> HistoryItem:
         """
         Args:
             historyItemID: The HistoryItem ID.
@@ -313,6 +313,9 @@ class User:
         Returns:
             HistoryItem: The corresponding HistoryItem
         """
+        if isinstance(historyItemID, GenerationInfo):
+            historyItemID = historyItemID.history_item_id
+
         response = _api_get(f"/history/{historyItemID}", headers=self._headers)
         historyData = response.json()
         from elevenlabslib.HistoryItem import HistoryItem
