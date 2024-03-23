@@ -26,6 +26,8 @@ import websockets.sync.client
 
 from elevenlabslib import Voice
 from elevenlabslib.Model import Model
+from elevenlabslib._audio_cutter_helper import split_audio
+
 
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
@@ -40,6 +42,7 @@ subscriptionTiers = subscription_tiers
 defaultHeaders = default_headers
 apiEndpoint = api_endpoint
 
+default_sts_model = "eleven_multilingual_sts_v2"
 
 category_shorthands = {
     "generated": "gen",
@@ -184,6 +187,10 @@ def _api_multipart(path, headers, data, filesData=None, stream=False, params=Non
         "data":data
     }
     if filesData is not None:
+        for file in filesData.values():
+            if isinstance(file, io.IOBase):
+                file.seek(0)    #Ensure we always read from the start
+
         args["files"] = filesData
     if params is not None:
         args["params"] = params
@@ -818,23 +825,6 @@ def run_ai_speech_classifier(audioBytes:bytes):
     response = _api_multipart("/moderation/ai-speech-classification", headers=None, data=None, filesData=files)
     return response.json()
 
-def play_audio_bytes_v2(audioData:bytes, playbackOptions:PlaybackOptions) -> sd.OutputStream:
-    warn("Deprecated, please use play_audio_v2 instead.", DeprecationWarning)
-
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(audioData, tuple):
-        for item in audioData:
-            if isinstance(item, bytes):
-                audioData = item
-    playbackWrapper = _SDPlaybackWrapper(audioData, playbackOptions, "mp3_44100_128")
-
-    if not playbackOptions.runInBackground:
-        with playbackWrapper.stream:
-            playbackWrapper.endPlaybackEvent.wait()
-    else:
-        playbackWrapper.stream.start()
-        return playbackWrapper.stream
-
 def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:PlaybackOptions=PlaybackOptions(), audioFormat:Union[str, GenerationOptions]="mp3_44100_128") -> sd.OutputStream:
     """
     Plays the given audio and calls the given functions.
@@ -969,26 +959,6 @@ def save_audio_v2(audioData:Union[bytes, numpy.ndarray], saveLocation:Union[Bina
             saveLocation.flush()
 
 
-def save_audio_bytes(audioData:bytes, saveLocation:Union[BinaryIO,str], outputFormat) -> None:
-    warn("This function is deprecated, use save_audio_v2 instead", DeprecationWarning)
-
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(audioData, tuple):
-        for item in audioData:
-            if isinstance(item, bytes):
-                audioData = item
-
-    tempSoundFile = soundfile.SoundFile(io.BytesIO(audioData))
-
-
-    if isinstance(saveLocation, str):
-        with open(saveLocation, "wb") as fp:
-            sf.write(fp, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-    else:
-        sf.write(saveLocation, tempSoundFile.read(), tempSoundFile.samplerate, format=outputFormat)
-        if callable(getattr(saveLocation,"flush")):
-            saveLocation.flush()
-
 #This class is used to make async generators into normal iterators for input streaming. I didn't feel like reworking all the code to be async instead of multithreaded.
 class SyncIterator:
     def __init__(self, async_iter):
@@ -1119,9 +1089,11 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
                     logging.debug(f"\nOther items are first in queue, waiting for 0.5s\n")
                     time.sleep(0.5)  # The time to peek at the queue is constant.
             except requests.exceptions.RequestException as e:
-                error_status = e.response.json()["detail"]["status"]
+                print(generationID)
+                response_json = e.response.json()
+                error_status = response_json["detail"]["status"]
                 if error_status == "too_many_concurrent_requests" or error_status == "system_busy":
-                    logging.debug(f"\nWaiting for {0.5 * waitMultiplier}s\n")
+                    logging.warning(f"\nSystem overloaded, waiting for {0.5 * waitMultiplier}s\n")
                     time.sleep(0.5 * waitMultiplier)  # Just wait a moment and try again.
                     waitMultiplier += 1
                     continue
@@ -1178,3 +1150,61 @@ def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
         audio_io = source_audio
 
     return audio_io, audio_hash
+
+
+
+
+#Audio cutting/ONNX stuff.
+def sts_long_audio(source_audio:Union[bytes, BinaryIO], voice:Voice, generation_options:GenerationOptions = GenerationOptions(model="eleven_multilingual_sts_v2"), speech_threshold:float=0.5) -> bytes:
+    """
+    Allows you to process a long audio file with speech to speech automatically, using Silero-VAD to split it up naturally.
+
+    Arguments:
+        source_audio (bytes|BinaryIO): The source audio.
+        voice (Voice): The voice to use for STS.
+        generation_options (GenerationOptions): The generation options to use. The model specified must support STS.
+        speech_threshold (float): The likelyhood that a segment must be speech for it to be recognized (0.5/50% works for most audio files).
+    Returns:
+        bytes: The bytes of the final audio, all concatenated, in mp3 format.
+    """
+    if isinstance(source_audio, io.IOBase):
+        source_audio.seek(0)
+        source_audio = source_audio.read()
+
+    #Only mp3 works. So we default to mp3 highest.
+    if "mp3" not in generation_options.output_format:
+        generation_options = dataclasses.replace(generation_options, output_format="mp3_highest")
+        generation_options = voice.linkedUser.get_real_audio_format(generation_options)
+
+    audio_segments = split_audio(source_audio, speech_threshold=speech_threshold)
+
+    destination_io = io.BytesIO()
+    tts_segments:List[bytes] = []
+    tts_futures:List[concurrent.futures.Future] = []
+
+    #Queue them all up for generation
+    for idx, audio_io in enumerate(audio_segments):
+        print(f"Queueing up {idx+1}/{len(audio_segments)}")
+        audio_io.seek(0)
+        tts_future, _ = voice.generate_audio_v3(audio_io, generation_options=generation_options)
+        tts_futures.append(tts_future)
+
+    #Get the results
+    for idx, tts_future in enumerate(tts_futures):
+        print(f"Getting {idx+1}/{len(tts_futures)}")
+        tts_segment = tts_future.result()
+        data, samplerate = sf.read(io.BytesIO(tts_segment), dtype="float32")
+        tts_segments.append(data)
+
+    concatenated_samples = np.concatenate(tts_segments)
+
+    #Technically, the section below is useless. I'm keeping it just in case they add support for other formats for STS.
+    audio_extension = ""
+    if "mp3" in generation_options.output_format: audio_extension = "mp3"
+    if "pcm" in generation_options.output_format: audio_extension = "wav"
+    if "ulaw" in generation_options.output_format: audio_extension = "wav"
+
+    save_audio_v2(concatenated_samples, destination_io, audio_extension, generation_options)
+    destination_io.seek(0)
+
+    return destination_io.read()

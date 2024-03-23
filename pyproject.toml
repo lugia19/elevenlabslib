@@ -16,10 +16,13 @@ dependencies=[
     "requests",
     "sounddevice",
     "numpy",
-    "soundfile >= 0.12.1",
+    "soundfile >= 0.13.0",
     "websockets",
     "fuzzywuzzy",
-    "python-Levenshtein"
+    "python-Levenshtein",
+    "resampy",
+    "appdirs",
+    "onnxruntime"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
