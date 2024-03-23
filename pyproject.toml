@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elevenlabslib"
-version = "0.20.0"
+version = "0.21.0"
 authors = [
   { name="lugia19", email="lugia19@lugia19.com" },
 ]
@@ -16,7 +16,7 @@ dependencies=[
     "requests",
     "sounddevice",
     "numpy",
-    "soundfile >= 0.13.0",
+    "soundfile >= 0.12.1",
     "websockets",
     "fuzzywuzzy",
     "python-Levenshtein",
