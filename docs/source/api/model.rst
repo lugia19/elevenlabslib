@@ -1,5 +1,5 @@
 Model
 =================
 
-.. automodule:: elevenlabslib.ElevenLabsModel
+.. automodule:: elevenlabslib.Model
     :members:

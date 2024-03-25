@@ -1,5 +1,5 @@
 History item
 =================
 
-.. automodule:: elevenlabslib.ElevenLabsHistoryItem
+.. automodule:: elevenlabslib.HistoryItem
     :members:

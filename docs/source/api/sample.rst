@@ -1,5 +1,5 @@
 Cloned voice sample
 ====================
 
-.. automodule:: elevenlabslib.ElevenLabsSample
+.. automodule:: elevenlabslib.Sample
     :members:
