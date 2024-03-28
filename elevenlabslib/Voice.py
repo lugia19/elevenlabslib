@@ -84,9 +84,9 @@ class Voice:
         # This is the name at the time the object was created. It won't be updated.
         # (Useful to iterate over all voices to find one with a specific name without spamming the API)
         self.initialName = voiceData["name"]
-        self._name = voiceData["name"]
-        self._description = voiceData["description"]
-        self._voiceID = voiceData["voice_id"]
+        self.name = voiceData["name"]
+        self.description = voiceData["description"]
+        self.voiceID = voiceData["voice_id"]
         self._category = voiceData["category"]
         self._sharingData = voiceData["sharing"]
         self._settings = voiceData["settings"]
@@ -107,11 +107,11 @@ class Voice:
         Returns:
             dict: A dict containing all the metadata for the voice, such as the name, the description, etc.
         """
-        response = _api_get("/voices/" + self._voiceID, self._linkedUser.headers, params={"with_settings": True})
+        response = _api_get("/voices/" + self.voiceID, self._linkedUser.headers, params={"with_settings": True})
 
         voiceData = response.json()
-        self._name = voiceData["name"]
-        self._description = voiceData["description"]
+        self.name = voiceData["name"]
+        self.description = voiceData["description"]
         self._sharingData = voiceData["sharing"]
         self._settings = voiceData["settings"]
 
@@ -169,18 +169,6 @@ class Voice:
         self._linkedUser = newUser
 
     @property
-    def voiceID(self):
-        return self._voiceID
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def description(self):
-        return self._description
-
-    @property
     def settings(self):
         if self._settings is None:
             self.update_data()
@@ -215,7 +203,7 @@ class Voice:
             if not (0 <= arg <= 1):
                 raise ValueError("Please provide a value between 0 and 1.")
         payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "use_speaker_boost":use_speaker_boost}
-        _api_json("/voices/" + self._voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
+        _api_json("/voices/" + self.voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
         self._settings = payload
 
     def _generate_payload_and_options(self, prompt:Union[str, bytes, BinaryIO], generationOptions:GenerationOptions=None) -> (dict, GenerationOptions):
@@ -359,7 +347,7 @@ class Voice:
         params = self._generate_parameters(generation_options)
         if isinstance(prompt, str):
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-            requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+            requestFunction = lambda: _api_json("/text-to-speech/" + self.voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         else:
             if "output_format" in params:
                 params.pop("output_format")
@@ -367,7 +355,7 @@ class Voice:
             source_audio, io_hash = io_hash_from_audio(prompt)
             files = {"audio": source_audio}
             generationID = f"{self.voiceID} - {io_hash} - {time.time()}"
-            requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream",
+            requestFunction = lambda: _api_multipart("/speech-to-speech/" + self.voiceID + "/stream",
                                                      self._linkedUser.headers, data=payload, params=params, filesData=files, stream=True)
 
         audio_future = concurrent.futures.Future()
@@ -423,7 +411,7 @@ class Voice:
         response_connection_future = concurrent.futures.Future()
         if isinstance(prompt, str): #Checking prompting_options is None is pointless, since if it's not None prompt will be an iterator anyway.
             payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
-            path = "/text-to-speech/" + self._voiceID + "/stream"
+            path = "/text-to-speech/" + self.voiceID + "/stream"
             # Not using input streaming
             params = self._generate_parameters(generation_options)
             requestFunction = lambda: _api_json(path, headers=self._linkedUser.headers, jsonData=payload, stream=True, params=params)
@@ -435,7 +423,7 @@ class Voice:
 
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
             payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
-            path = "/speech-to-speech/" + self._voiceID + "/stream"
+            path = "/speech-to-speech/" + self.voiceID + "/stream"
             # Using speech to speech
             params = self._generate_parameters(generation_options)
             if "output_format" in params:
@@ -650,15 +638,15 @@ class EditableVoice(Voice):
             payload["labels"] = newLabels
         if description is not None:
             payload["description"] = description
-        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload)
+        _api_multipart("/voices/" + self.voiceID + "/edit", self._linkedUser.headers, data=payload)
     def delete_voice(self):
         """
         This function deletes the voice, and also sets the voiceID to be empty.
         """
         if self._category == "premade":
             raise RuntimeError("Cannot delete premade voices!")
-        response = _api_del("/voices/" + self._voiceID, self._linkedUser.headers)
-        self._voiceID = ""
+        response = _api_del("/voices/" + self.voiceID, self._linkedUser.headers)
+        self.voiceID = ""
 
 class DesignedVoice(EditableVoice):
     """
@@ -774,7 +762,7 @@ class ClonedVoice(EditableVoice):
         for fileName, fileBytes in samples.items():
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
 
-        _api_multipart("/voices/" + self._voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
+        _api_multipart("/voices/" + self.voiceID + "/edit", self._linkedUser.headers, data=payload, filesData=files)
 
 class LibraryVoiceData:
     def __init__(self, lib_voice_data):

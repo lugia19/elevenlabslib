@@ -9,8 +9,8 @@ class Sample:
     """
     def __init__(self, sampleData, parentVoice:Voice):
         self._parentVoice = parentVoice
-        self._sampleID = sampleData["sample_id"]
-        self._fileName = sampleData["file_name"]
+        self.sampleID = sampleData["sample_id"]
+        self.fileName = sampleData["file_name"]
         self._fullMetaData = sampleData
         self._mimeType = sampleData["mime_type"]
         self._size = sampleData["size_bytes"]
@@ -31,20 +31,6 @@ class Sample:
         """
         return self._parentVoice
 
-    @property
-    def sampleID(self):
-        """
-        The unique sampleID.
-        """
-        return self._sampleID
-
-    @property
-    def fileName(self):
-        """
-        The filename of the sample.
-        """
-        return self._fileName
-
     def get_audio_bytes(self) -> bytes:
         """
         Retrieves the audio bytes associated with the sample.
@@ -56,7 +42,7 @@ class Sample:
             bytes: a bytes object containing the audio in whatever format it was originally uploaded in.
         """
         if self._audioData is None:
-            response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID + "/audio", self._parentVoice.linkedUser.headers)
+            response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self.sampleID + "/audio", self._parentVoice.linkedUser.headers)
             self._audioData = response.content
         return self._audioData
 
@@ -80,8 +66,8 @@ class Sample:
         """
         Deletes the sample.
         """
-        response = _api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self._sampleID, self._parentVoice.linkedUser.headers)
-        self._sampleID = ""
+        response = _api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self.sampleID, self._parentVoice.linkedUser.headers)
+        self.sampleID = ""
 
 
 class ElevenLabsSample(Sample):

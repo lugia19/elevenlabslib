@@ -26,15 +26,15 @@ class HistoryItem:
         	parentUser: an instance of User class representing the user that generated it
         """
         self._parentUser:User = parentUser
-        self._historyID = data["history_item_id"]
+        self.historyID = data["history_item_id"]
         self._voiceId = data["voice_id"]
-        self._voiceName = data["voice_name"]
+        self.voiceName = data["voice_name"]
         self._voiceCategory = data["voice_category"]
         self._model = data["model_id"]
-        self._text = data["text"]
+        self.text = data["text"]
         self._dateUnix = data["date_unix"]
-        self._characterCountChangeFrom = data["character_count_change_from"]
-        self._characterCountChangeTo = data["character_count_change_to"]
+        self.characterCountChangeFrom = data["character_count_change_from"]
+        self.characterCountChangeTo = data["character_count_change_to"]
         self._settingsUsed = data["settings"]
         self._fullMetadata = data
         self._audioData = None
@@ -67,12 +67,6 @@ class HistoryItem:
                                  style=self._settingsUsed.get("style"),
                                  use_speaker_boost=self._settingsUsed.get("use_speaker_boost"),
                                  latencyOptimizationLevel=-99)
-    @property
-    def historyID(self):
-        """
-        The ID of the history item.
-        """
-        return self._historyID
 
     @property
     def parentUser(self):
@@ -89,24 +83,11 @@ class HistoryItem:
         return self._voiceId
 
     @property
-    def voiceName(self):
-        """
-        The name of the voice used.
-        """
-        return self._voiceName
-    @property
     def voiceCategory(self):
         """
         The type of voice used.
         """
         return self._voiceCategory
-
-    @property
-    def text(self):
-        """
-        The text of the item.
-        """
-        return self._text
 
     @property
     def source(self):
@@ -116,19 +97,11 @@ class HistoryItem:
         return self._source
 
     @property
-    def characterCountChangeFrom(self):
-        return self._characterCountChangeFrom
-
-    @property
-    def characterCountChangeTo(self):
-        return self._characterCountChangeTo
-
-    @property
     def characterCountChangeAmount(self):
         """
         How many characters this generation used.
         """
-        return self._characterCountChangeTo - self._characterCountChangeFrom
+        return self.characterCountChangeTo - self.characterCountChangeFrom
 
     @property
     def timestamp(self):
@@ -289,7 +262,7 @@ class HistoryItem:
         Deletes the item from your history.
         """
         response = _api_del("/history/" + self.historyID, self._parentUser.headers)
-        self._historyID = ""
+        self.historyID = ""
 
 
 
