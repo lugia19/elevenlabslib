@@ -588,8 +588,8 @@ class ReusableInputStreamer:
     def _renew_socket(self):
         self._websocket_ready_event.clear()
         self._websocket = None
-        self._websocket, self._currentGenOptions = self._voice._generate_websocket_and_options(self._websocketOptions, self._generationOptions) # noqa - shut up, I know it's internal.
-        self._currentGenOptions = self._voice.linkedUser.get_real_audio_format(self._currentGenOptions)
+        self._currentGenOptions = self._voice._complete_generation_options(self._generationOptions) # noqa - Yes, it's internal.
+        self._websocket = self._voice._generate_websocket(self._websocketOptions, self._generationOptions) # noqa - Yes, it's internal.
         self._websocket_ready_event.set()
         self._last_renewal_time = time.perf_counter()
 
@@ -665,10 +665,12 @@ class ReusableInputStreamer:
 
             from elevenlabslib.Voice import _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker
             streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
+            temp_future = concurrent.futures.Future()
+            temp_future.set_result(current_socket)
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
             else:
-                streamer = _NumpyRAWStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
 
             transcript_future.set_result(streamer.transcript_queue)
 
@@ -739,8 +741,8 @@ class ReusableInputStreamerNoPlayback:
     def _renew_socket(self):
         self._websocket_ready_event.clear()
         self._websocket = None
-        self._websocket, self._currentGenOptions = self._voice._generate_websocket_and_options(self._websocketOptions, self._generationOptions) # noqa - shut up, I know it's internal.
-        self._currentGenOptions = self._voice.linkedUser.get_real_audio_format(self._currentGenOptions)
+        self._currentGenOptions = self._voice._complete_generation_options(self._generationOptions) # noqa - Yes, it's internal.
+        self._websocket = self._voice._generate_websocket(self._websocketOptions, self._generationOptions) # noqa - Yes, it's internal.
         self._websocket_ready_event.set()
         self._last_renewal_time = time.perf_counter()
 
@@ -800,10 +802,12 @@ class ReusableInputStreamerNoPlayback:
             threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
             from elevenlabslib.Voice import _NumpyMp3Streamer, _NumpyRAWStreamer
             streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
+            temp_future = concurrent.futures.Future()
+            temp_future.set_result(current_socket)
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
             else:
-                streamer = _NumpyRAWStreamer(current_socket, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
 
             audio_queue_future.set_result(streamer.playback_queue)
             transcript_queue_future.set_result(streamer.transcript_queue)

@@ -271,21 +271,18 @@ class Voice:
         params["output_format"] = generationOptions.output_format
         return params
 
-    def _generate_websocket_and_options(self, websocketOptions:WebsocketOptions=None, generationOptions:GenerationOptions=None) -> (websockets.sync.client.ClientConnection, GenerationOptions):
+    def _generate_websocket(self, websocketOptions:WebsocketOptions=None, generationOptions:GenerationOptions=None) -> websockets.sync.client.ClientConnection:
         """
         Generates a websocket connection for the input-streaming endpoint.
 
         Args:
             websocketOptions (WebsocketOptions): The settings for the websocket.
-            generationOptions (GenerationOptions): The options for this generation.
+            generationOptions (GenerationOptions): The options for this generation (with all values, so make a copy and run self._complete_generation_options() on it first!)
         Returns:
             A tuple of:
             dict: A dictionary representing the payload for the API call.
             GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
-
-        generationOptions = dataclasses.replace(generationOptions)  # Ensure we have a copy, not the original.
-        generationOptions = self._complete_generation_options(generationOptions)
         voice_settings = generationOptions.get_voice_settings_dict()
 
         if websocketOptions is None:
@@ -310,7 +307,7 @@ class Voice:
         )
         websocket.send(json.dumps(BOS))
 
-        return websocket, generationOptions
+        return websocket
 
     def _generate_audio_prompting(self, prompt:str, generation_options:GenerationOptions, promptingOptions:PromptingOptions):
         """
@@ -361,14 +358,15 @@ class Voice:
         payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
         params = self._generate_parameters(generation_options)
         if isinstance(prompt, str):
+            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             requestFunction = lambda: _api_json("/text-to-speech/" + self._voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
         else:
             if "output_format" in params:
                 params.pop("output_format")
 
-            source_audio, prompt = io_hash_from_audio(prompt)
+            source_audio, io_hash = io_hash_from_audio(prompt)
             files = {"audio": source_audio}
-
+            generationID = f"{self.voiceID} - {io_hash} - {time.time()}"
             requestFunction = lambda: _api_multipart("/speech-to-speech/" + self._voiceID + "/stream",
                                                      self._linkedUser.headers, data=payload, params=params, filesData=files, stream=True)
 
@@ -382,7 +380,6 @@ class Voice:
             threading.Thread(target=wrapped).start()
             return audio_future, None
         else:
-            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
             def wrapped():
                 responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
                 response_headers = responseConnection.headers
@@ -408,12 +405,10 @@ class Voice:
         """
         Internal use only - sets up and returns a _NumpyStreamer of the correct type, which will stream the audio data.
         """
-
-        is_sts = False  # This is just a bodge.
-
         # We need the real sample rate.
         generation_options = self._complete_generation_options(generation_options)
 
+        #prompting_options section (turn prompt into iterator)
         if isinstance(prompt, str) and prompting_options is not None:
             original_prompt = prompt
 
@@ -425,8 +420,8 @@ class Voice:
             websocket_options = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
         else:
             prompting_options = None  # Ignore them if not generating a normal string.
-
-        if isinstance(prompt, str) and prompting_options is None:
+        response_connection_future = concurrent.futures.Future()
+        if isinstance(prompt, str): #Checking prompting_options is None is pointless, since if it's not None prompt will be an iterator anyway.
             payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
             path = "/text-to-speech/" + self._voiceID + "/stream"
             # Not using input streaming
@@ -434,9 +429,11 @@ class Voice:
             requestFunction = lambda: _api_json(path, headers=self._linkedUser.headers, jsonData=payload, stream=True, params=params)
 
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+            def wrapper():
+                response_connection_future.set_result(_api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue))
+            threading.Thread(target=wrapper).start()
+
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
-            is_sts = True
             payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
             path = "/speech-to-speech/" + self._voiceID + "/stream"
             # Using speech to speech
@@ -444,26 +441,32 @@ class Voice:
             if "output_format" in params:
                 params.pop("output_format")
 
-            source_audio, prompt = io_hash_from_audio(prompt)
+            source_audio, audio_hash = io_hash_from_audio(prompt)
 
             files = {"audio": source_audio}
 
             requestFunction = lambda: _api_multipart(path, headers=self._linkedUser.headers, data=payload, stream=True, filesData=files, params=params)
-            generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+            generationID = f"{self.voiceID} - {audio_hash} - {time.time()}"
+            def wrapper():
+                response_connection_future.set_result(_api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue))
+            threading.Thread(target=wrapper).start()
+
         elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or prompting_options is not None:
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
-            responseConnection, generation_options = self._generate_websocket_and_options(websocket_options, generation_options)
+
+            def wrapper():
+                response_connection_future.set_result(self._generate_websocket(websocket_options, generation_options))
+            threading.Thread(target=wrapper).start()
         else:
             raise ValueError("Unknown type passed for prompt.")
 
         streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
 
-        if "mp3" in generation_options.output_format or is_sts:
-            streamer = _NumpyMp3Streamer(responseConnection, generation_options, websocket_options, prompt, prompting_options)
+        if "mp3" in generation_options.output_format or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
+            streamer = _NumpyMp3Streamer(response_connection_future, generation_options, websocket_options, prompt, prompting_options)
         else:
-            streamer = _NumpyRAWStreamer(responseConnection, generation_options, websocket_options, prompt, prompting_options)
+            streamer = _NumpyRAWStreamer(response_connection_future, generation_options, websocket_options, prompt, prompting_options)
 
         return streamer
 
@@ -498,10 +501,6 @@ class Voice:
         streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer] = self._setup_streamer(prompt, generation_options, websocket_options, prompting_options)
         audio_stream_future, transcript_queue, generation_info_future = None, None, None
 
-        #TODO:
-        #   Actually add a reason why generation_info_future is a future instead of it being a useless wrapper.
-        #   Need to refactor _setup_streamer for it, as well as the audio streamers.
-
         if disable_playback:
             mainThread = threading.Thread(target=streamer.begin_streaming)
             mainThread.start()
@@ -524,12 +523,14 @@ class Voice:
             else:
                 player.begin_playback(audio_stream_future)
 
-        if isinstance(streamer.connection, requests.Response):
-            connection_headers = streamer.connection.headers
+        if (isinstance(prompt, str) and prompting_options is None) or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
             generation_info_future = concurrent.futures.Future()
-            generation_info_future.set_result(GenerationInfo(history_item_id=connection_headers.get("history-item-id"),
-                           request_id=connection_headers.get("request-id"),
-                           tts_latency_ms=connection_headers.get("tts-latency-ms")))
+            def wrapper():
+                connection_headers = streamer.connection_future.result().headers
+                generation_info_future.set_result(GenerationInfo(history_item_id=connection_headers.get("history-item-id"),
+                               request_id=connection_headers.get("request-id"),
+                               tts_latency_ms=connection_headers.get("tts-latency-ms")))
+            threading.Thread(target=wrapper).start()
         else:
             transcript_queue = streamer.transcript_queue
 
@@ -840,7 +841,7 @@ def _set_websocket_buffer_amount(websocket_options:WebsocketOptions, generation_
     return websocket_options
 
 class _AudioStreamer:
-    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+    def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         self._events: dict[str, threading.Event] = {
             "websocketDataSufficient": threading.Event(), #Technically this is only relevant for playback. HOWEVER, it's _AudioStreamer itself that handles firing it. So it's here.
@@ -856,19 +857,20 @@ class _AudioStreamer:
         self._end_frame = None
 
         if prompting_options is not None:   #Sanity check
-            if isinstance(prompt, Iterator) or not isinstance(prompt, SyncIterator):
+            if isinstance(prompt, Iterator) and not isinstance(prompt, SyncIterator):   #Must be a normal iterator, and not a SyncIterator.
                 self._enable_cutout = True
                 if prompting_options.pre_prompt == "":
                     self._start_frame = 0
 
-        self.connection = streamConnection
+        self.connection_future:Future[Union[requests.Response, websockets.sync.client.ClientConnection]] = streamConnection
+        self.connection:Optional[Union[requests.Response, websockets.sync.client.ClientConnection]] = None
 
         self._generation_options = generation_options
         self.sample_rate = int(generation_options.output_format.split("_")[1])
         self.websocket_options = _set_websocket_buffer_amount(websocket_options, generation_options)
         self.channels = 1
 
-        if isinstance(self.connection, requests.Response) or self.websocket_options.buffer_char_length <= 0:
+        if ((isinstance(prompt, str) and prompting_options is None) or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes)) or self.websocket_options.buffer_char_length <= 0:
             self._events["websocketDataSufficient"].set()   #If we don't need any buffering, set it immediately.
 
         self._prompt = prompt
@@ -1048,7 +1050,7 @@ class _AudioStreamer:
 
 class _DownloadStreamer(_AudioStreamer):
     #Currently unused - just puts the raw audio bytes in a queue
-    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+    def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         self.destination_queue = queue.Queue()
@@ -1060,6 +1062,8 @@ class _DownloadStreamer(_AudioStreamer):
 
     def begin_streaming(self):
         logging.debug("Starting playback...")
+
+        self.connection = self.connection_future.result()
         if isinstance(self.connection, requests.Response):
             self._stream_downloader_function()
         else:
@@ -1072,7 +1076,7 @@ class _DownloadStreamer(_AudioStreamer):
         self.destination_queue.put(chunk)
 
 class _NumpyMp3Streamer(_AudioStreamer):
-    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+    def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         parts = generation_options.output_format.lower().split("_")
@@ -1183,7 +1187,7 @@ class _NumpyMp3Streamer(_AudioStreamer):
     def begin_streaming(self):
         self._bytesFile = io.BytesIO()
         self._bytesSoundFile: Optional[sf.SoundFile] = None  # Needs to be created later.
-
+        self.connection = self.connection_future.result()
 
         if isinstance(self.connection, requests.Response):
             downloadThread = threading.Thread(target=self._stream_downloader_function)
@@ -1282,7 +1286,7 @@ class _NumpyMp3Streamer(_AudioStreamer):
                     self._events["blockDataAvailable"].set()
 
 class _NumpyRAWStreamer(_AudioStreamer):
-    def __init__(self, streamConnection: Union[requests.Response, websockets.sync.client.ClientConnection],
+    def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
                  generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
         super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
         parts = generation_options.output_format.lower().split("_")
@@ -1301,7 +1305,7 @@ class _NumpyRAWStreamer(_AudioStreamer):
 
     def begin_streaming(self):
         logging.debug("Beginning stream...")
-
+        self.connection = self.connection_future.result()
 
         if isinstance(self.connection, requests.Response):
             self._stream_downloader_function()
