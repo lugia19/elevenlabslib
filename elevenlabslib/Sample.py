@@ -45,12 +45,6 @@ class Sample:
             response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self.sampleID + "/audio", self._parentVoice.linkedUser.headers)
             self._audioData = response.content
         return self._audioData
-
-    def play_audio(self, playInBackground: bool, portaudioDeviceID: Optional[int] = None,
-                     onPlaybackStart:Callable=lambda: None, onPlaybackEnd:Callable=lambda: None) -> sd.OutputStream:
-        warn("This function is outdated. Please use play_audio_v2() instead.", DeprecationWarning)
-        return self.play_audio_v2(PlaybackOptions(playInBackground, portaudioDeviceID, onPlaybackStart, onPlaybackEnd))
-
     def play_audio_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
         """
         Plays the audio associated with the sample.
