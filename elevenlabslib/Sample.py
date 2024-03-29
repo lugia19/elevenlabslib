@@ -1,13 +1,15 @@
 from __future__ import annotations
 from elevenlabslib.Voice import Voice
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PlayableItem
 
-class Sample:
+
+class Sample(_PlayableItem):
     """
     Represents a sample used for a cloned voice.
     """
-    def __init__(self, sampleData, parentVoice:Voice):
+    def __init__(self, sampleData, parentVoice: Voice):
+        super().__init__()
         self._parentVoice = parentVoice
         self.sampleID = sampleData["sample_id"]
         self.fileName = sampleData["file_name"]
@@ -15,7 +17,6 @@ class Sample:
         self._mimeType = sampleData["mime_type"]
         self._size = sampleData["size_bytes"]
         self._hash = sampleData["hash"]
-        self._audioData = None      #This is used to cache the audio data since it never changes.
 
     @property
     def metadata(self):
@@ -32,29 +33,7 @@ class Sample:
         return self._parentVoice
 
     def get_audio_bytes(self) -> bytes:
-        """
-        Retrieves the audio bytes associated with the sample.
-
-        Note:
-            The audio will be cached so that it's not downloaded every time this is called.
-
-        Returns:
-            bytes: a bytes object containing the audio in whatever format it was originally uploaded in.
-        """
-        if self._audioData is None:
-            response = _api_get("/voices/" + self._parentVoice.voiceID + "/samples/" + self.sampleID + "/audio", self._parentVoice.linkedUser.headers)
-            self._audioData = response.content
-        return self._audioData
-    def play_audio_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
-        """
-        Plays the audio associated with the sample.
-
-        Args:
-            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
-        Returns:
-            The sounddevice OutputStream of the playback.
-        """
-        return play_audio_v2(self.get_audio_bytes(), playbackOptions)
+        return self._fetch_and_cache_audio(f"/voices/{self._parentVoice.voiceID}/samples/{self.sampleID}/audio", self._parentVoice.linkedUser.headers)
 
     def delete(self):
         """

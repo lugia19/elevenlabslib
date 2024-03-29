@@ -6,9 +6,10 @@ import requests
 
 from elevenlabslib.User import User
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json,_api_del,_api_get,_api_multipart, _audio_is_raw
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _audio_is_raw, _PlayableItem
 
-class HistoryItem:
+
+class HistoryItem(_PlayableItem):
     """
     Represents a previously generated audio.
 
@@ -17,7 +18,7 @@ class HistoryItem:
         You can use the voiceID for that.
     """
 
-    def __init__(self, data:dict, parentUser:User):
+    def __init__(self, data: dict, parentUser: User):
         """
         Initializes a new instance of the HistoryItem class.
 
@@ -25,6 +26,7 @@ class HistoryItem:
         	data: a dictionary containing information about the history item
         	parentUser: an instance of User class representing the user that generated it
         """
+        super().__init__()
         self._parentUser:User = parentUser
         self.historyID = data["history_item_id"]
         self._voiceId = data["voice_id"]
@@ -37,7 +39,6 @@ class HistoryItem:
         self.characterCountChangeTo = data["character_count_change_to"]
         self._settingsUsed = data["settings"]
         self._fullMetadata = data
-        self._audioData = None
         self._source = data["source"]
 
     @property
@@ -166,12 +167,10 @@ class HistoryItem:
         Returns:
             bytes: The bytes of the mp3 file.
         """
-        if self._audioData is None:
-            response = _api_get("/history/" + self.historyID + "/audio", self._parentUser.headers)
-            self._audioData = response.content
-        return self._audioData
+        return self._fetch_and_cache_audio(f"/history/{self.historyID}/audio", self._parentUser.headers)
 
-    def play_audio_v2(self, playbackOptions:PlaybackOptions) -> sd.OutputStream:
+    def play_audio_v2(self, playbackOptions:PlaybackOptions = PlaybackOptions()) -> sd.OutputStream:
+        #Has to override the parent method due to the special handling for PCM.
         """
         Plays the audio associated with the history item.
 

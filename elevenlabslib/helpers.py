@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import concurrent.futures
 from concurrent.futures import Future
@@ -10,7 +12,7 @@ import queue
 import threading
 import time
 import zlib
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple, TYPE_CHECKING
 from warnings import warn
 import json
 import numpy
@@ -22,10 +24,12 @@ import soundfile as sf
 import requests
 import os
 
-import websockets.sync.client
+from typing import TYPE_CHECKING
 
-from elevenlabslib import Voice
-from elevenlabslib.Model import Model
+import websockets.sync.client
+if TYPE_CHECKING:
+    from elevenlabslib import Voice
+    from elevenlabslib.Model import Model
 from elevenlabslib._audio_cutter_helper import split_audio
 
 
@@ -828,6 +832,36 @@ def run_ai_speech_classifier(audioBytes:bytes):
     files = {'file': ('audioSample.mp3', data, 'audio/mpeg')}
     response = _api_multipart("/moderation/ai-speech-classification", headers=None, data=None, filesData=files)
     return response.json()
+
+class _PlayableItem:    #Just a wrapper class to avoid code re-use
+    def __init__(self):
+        self._audioData = None
+    def _fetch_and_cache_audio(self, url, headers):
+        if self._audioData is None:
+            response = _api_get(url, headers)
+            self._audioData = response.content
+        return self._audioData
+    def get_audio_bytes(self) -> bytes:
+        #Designed to just be overridden.
+        """
+        Retrieves the audio bytes associated with this object.
+        Note:
+            The audio will be cached so that it's not downloaded every time this is called.
+        Returns:
+            bytes: a bytes object containing the audio in whatever format it was originally uploaded in.
+        """
+        pass
+    def play_audio_v2(self, playbackOptions:PlaybackOptions = PlaybackOptions()):
+        """
+        Plays the audio associated with this object.
+
+        Args:
+            playbackOptions (PlaybackOptions): Options for the audio playback such as the device to use and whether to run in the background.
+        Returns:
+            The sounddevice OutputStream of the playback.
+        """
+        audioBytes = self.get_audio_bytes()
+        return play_audio_v2(audioBytes, playbackOptions)
 
 def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:PlaybackOptions=PlaybackOptions(), audioFormat:Union[str, GenerationOptions]="mp3_44100_128") -> sd.OutputStream:
     """
