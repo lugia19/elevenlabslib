@@ -836,9 +836,9 @@ def run_ai_speech_classifier(audioBytes:bytes):
 class _PlayableItem:    #Just a wrapper class to avoid code re-use
     def __init__(self):
         self._audioData = None
-    def _fetch_and_cache_audio(self, url, headers):
+    def _fetch_and_cache_audio(self, fetch_method):
         if self._audioData is None:
-            response = _api_get(url, headers)
+            response = fetch_method()
             self._audioData = response.content
         return self._audioData
     def get_audio_bytes(self) -> bytes:

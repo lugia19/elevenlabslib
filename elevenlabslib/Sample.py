@@ -33,7 +33,7 @@ class Sample(_PlayableItem):
         return self._parentVoice
 
     def get_audio_bytes(self) -> bytes:
-        return self._fetch_and_cache_audio(f"/voices/{self._parentVoice.voiceID}/samples/{self.sampleID}/audio", self._parentVoice.linkedUser.headers)
+        return self._fetch_and_cache_audio(lambda: _api_get(f"/voices/{self._parentVoice.voiceID}/samples/{self.sampleID}/audio", self._parentVoice.linkedUser.headers))
 
     def delete(self):
         """

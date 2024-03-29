@@ -167,7 +167,7 @@ class HistoryItem(_PlayableItem):
         Returns:
             bytes: The bytes of the mp3 file.
         """
-        return self._fetch_and_cache_audio(f"/history/{self.historyID}/audio", self._parentUser.headers)
+        return self._fetch_and_cache_audio(lambda: _api_get(f"/history/{self.historyID}/audio", self._parentUser.headers))
 
     def play_audio_v2(self, playbackOptions:PlaybackOptions = PlaybackOptions()) -> sd.OutputStream:
         #Has to override the parent method due to the special handling for PCM.
