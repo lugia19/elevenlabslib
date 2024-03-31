@@ -12,7 +12,7 @@ import queue
 import threading
 import time
 import zlib
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple, TYPE_CHECKING
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple, TYPE_CHECKING, TextIO
 from warnings import warn
 import json
 import numpy
@@ -191,9 +191,10 @@ def _api_multipart(path, headers, data, filesData=None, stream=False, params=Non
         "data":data
     }
     if filesData is not None:
-        for file in filesData.values():
-            if isinstance(file, io.IOBase):
-                file.seek(0)    #Ensure we always read from the start
+        if isinstance(filesData, dict):
+            for file in filesData.values():
+                if isinstance(file, io.IOBase):
+                    file.seek(0)    #Ensure we always read from the start
 
         args["files"] = filesData
     if params is not None:
@@ -245,7 +246,7 @@ class GenerationOptions:
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
         output_format (str, optional): Output format for the audio. mp3_highest and pcm_highest will automatically use the highest quality of that format you have available.
-        forced_pronunciations (dict, optional): A dict specifying custom pronunciations for words. The key is the word, with the 'alphabet' and 'pronunciation' values required.
+        forced_pronunciations (dict, optional): A dict specifying custom pronunciations for words. The key is the word, with the 'alphabet' and 'pronunciation' values required. This will replace it in the prompt directly.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
