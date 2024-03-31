@@ -7,4 +7,5 @@ Classes documentation
     model.rst
     historyitem.rst
     sample.rst
+    project.rst
     :maxdepth: 3

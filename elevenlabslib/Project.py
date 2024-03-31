@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Dict, Optional, List
 
 from elevenlabslib import User
@@ -64,11 +65,11 @@ class Project:
 
     def convert(self):
         """
-        Begins the conversion of the project into audio.
+        Begins the conversion of the project into a snapshot.
         """
         response = _api_json(f"/projects/{self.project_id}/convert", self.linkedUser.headers, jsonData=None)
 
-    def get_chapters(self):
+    def get_chapters(self) -> List[Chapter]:
         """
         Gets the project's chapters.
         """
@@ -79,7 +80,7 @@ class Project:
             chapters.append(Chapter(chapter_data, self))
         return chapters
 
-    def get_chapter_by_id(self, chapter_id:str):
+    def get_chapter_by_id(self, chapter_id:str) -> Chapter:
         """
         Gets a chapter by its ID.
         """
@@ -87,7 +88,7 @@ class Project:
         chapter_data = response.json()
         return Chapter(chapter_data, self)
 
-    def get_snapshots(self):
+    def get_snapshots(self) -> List[ProjectSnapshot]:
         """
         Gets the project's snapshots (audio versions).
         """
@@ -98,7 +99,7 @@ class Project:
             snapshots.append(ProjectSnapshot(snapshot_data, self))
         return snapshots
 
-    def get_snapshot_by_id(self, project_snapshot_id:str):
+    def get_snapshot_by_id(self, project_snapshot_id:str) -> ProjectSnapshot:
         """
         Gets a snapshot of the project by ID.
         """
@@ -143,11 +144,11 @@ class Chapter:
 
     def convert(self):
         """
-        Begins the conversion of the chapter into audio.
+        Begins the conversion of the chapter into a snapshot.
         """
         response = _api_json(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}/convert", self.project.linkedUser.headers, jsonData=None)
 
-    def get_snapshots(self):
+    def get_snapshots(self) -> List[ChapterSnapshot]:
         """
         Gets the chapter's snapshots (audio versions).
         """
@@ -158,7 +159,7 @@ class Chapter:
             chapter_snapshots.append(ChapterSnapshot(chapter_snapshot_data, self))
         return chapter_snapshots
 
-    def get_snapshot_by_id(self, chapter_snapshot_id: str):
+    def get_snapshot_by_id(self, chapter_snapshot_id: str) -> ChapterSnapshot:
         """
         Gets a snapshot of the chapter by ID.
         """

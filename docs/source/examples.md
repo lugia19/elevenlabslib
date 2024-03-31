@@ -40,6 +40,21 @@ converted_audio = sts_long_audio(source_audio_file, voice)
 save_audio_v2(converted_audio, r"C:\your\output\location.mp3", "mp3")
 ```
 
+## Projects Listing and converting
+```python
+from elevenlabslib import *
+
+user = User("YOUR_API_KEY")
+projects = user.get_projects()
+for project in projects:
+    chapters = project.get_chapters()   #Get the project's chapters
+    for chapter in chapters:
+        print(chapter.name)
+        chapter_snapshots = chapter.get_snapshots() #Get the chapter's snapshots (audio versions)
+        if not chapter.conversion_progress and len(chapter_snapshots) == 0:
+            print("Chapter has no snapshots and isn't being converted, converting...")
+            chapter.convert()
+```
 
 ## Speech to speech
 ```python
