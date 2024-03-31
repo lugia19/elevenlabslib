@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import dataclasses
-import io
-import queue
+import mimetypes
 import zipfile
 
-from typing import TYPE_CHECKING, BinaryIO, Union, List, Tuple, Any
-from warnings import warn
+from typing import TYPE_CHECKING, TextIO
 
 from fuzzywuzzy import process
 
 from elevenlabslib.Model import Model
+from elevenlabslib.Project import Project, PronunciationDictionary
 from elevenlabslib.Voice import ClonedVoice, ProfessionalVoice, LibraryVoiceData
 from elevenlabslib.Voice import EditableVoice
 from elevenlabslib.Voice import DesignedVoice
@@ -18,10 +16,10 @@ from elevenlabslib.Voice import DesignedVoice
 
 if TYPE_CHECKING:
     from elevenlabslib.HistoryItem import HistoryItem
-    from elevenlabslib.Voice import Voice
+from elevenlabslib.Voice import Voice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _PeekQueue
+from elevenlabslib.helpers import _api_json, _api_get, _api_multipart, _PeekQueue
 
 
 class User:
@@ -471,7 +469,7 @@ class User:
 
     def clone_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ClonedVoice:
         """
-            Create a new GeneratedVoice object by providing the voice name and a dictionary of sample file names and bytes.
+            Create a new ClonedVoice object by providing the voice name and a dictionary of sample file names and bytes.
 
             Args:
                 name (str): Name of the voice to be created.
@@ -617,6 +615,103 @@ class User:
             raise e
 
 
+    def get_projects(self) -> List[Project]:
+        response = _api_get("/projects", headers=self._headers)
+        response_json = response.json()
+        projects = list()
+        for projectData in response_json["projects"]:
+            projects.append(Project(projectData, linked_user=self))
+
+        return projects
+
+    def get_project_by_id(self, project_id:str) -> Project:
+        response = _api_get(f"/projects/{project_id}", headers=self._headers)
+        response_json = response.json()
+        return Project(response_json, self)
+
+    def add_project(self, name: str, default_title_voice: [str, Voice], default_paragraph_voice: [str, Voice],
+                    default_model: [str| Model], pronunciation_dictionaries=None,
+                    from_url: Optional[str] = None, from_document: Optional[str] = None,
+                    quality_preset: str = "standard", title: Optional[str] = None,
+                    author: Optional[str] = None, isbn_number: Optional[str] = None,
+                    volume_normalization: bool = False) -> Project:
+        """
+        Creates a new project.
+
+        Parameters:
+            name (str): Name of the project.
+            default_title_voice (str|Voice): Default voice for titles.
+            default_paragraph_voice (str|Voice): Default voice for paragraphs.
+            default_model (str): Model for the project.
+            pronunciation_dictionaries (list[PronunciationDictionary]): Pronunciation dictionary locators.
+            from_url (str, optional): Optional URL to initialize project content.
+            from_document (str, optional): The filepath to a file from which to initialize the project.
+            quality_preset (str, optional): Quality preset for audio. Must be "standard", "high" or "ultra". Qualities higher than standard increase character cost. Defaults to standard.
+            title (str, optional): Project title.
+            author (str, optional): Author name.
+            isbn_number (str, optional): ISBN number.
+            volume_normalization (bool, optional): Whether to enable volume normalization. Defaults to False.
+        """
+
+        if isinstance(default_title_voice, Voice):
+            default_title_voice = default_title_voice.voiceID
+
+        if isinstance(default_paragraph_voice, Voice):
+            default_paragraph_voice = default_paragraph_voice.voiceID
+
+        if isinstance(default_model, Model):
+            default_model = default_model.modelID
+
+        if from_url and from_document:
+            raise ValueError("Specify only one of from_url or from_document.")
+
+        data = {
+            'name': name,
+            'default_title_voice_id': default_title_voice,
+            'default_paragraph_voice_id': default_paragraph_voice,
+            'default_model_id': default_model,
+            'quality_preset': quality_preset,
+            'title': title,
+            'author': author,
+            'isbn_number': isbn_number,
+            'volume_normalization': volume_normalization,
+            'pronunciation_dictionary_locators': [
+                    {
+                        "pronunciation_dictionary_id":pdict.pronunciation_dictionary_id,
+                        "version_id":pdict.version_id
+                    } for pdict in pronunciation_dictionaries
+            ] if pronunciation_dictionaries else []
+        }
+
+        files = None
+        if from_url:
+            data['from_url'] = from_url
+        elif from_document:
+            mime_type, _ = mimetypes.guess_type(from_document, strict=False)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+            files = {'from_document': (os.path.basename(from_document), open(from_document, 'rb'), mime_type)}
+
+        response = _api_multipart("/projects/add", headers=self.headers, data=data, filesData=files)
+        return Project(response.json()["project"], self)
+
+    def add_pronunciation_dictionary(self, name:str, description:str, dict_file:Union[str, TextIO]) -> PronunciationDictionary:
+        """
+        Adds a pronunciation dictionary.
+        Parameters:
+            name (str): The name for the dictionary.
+            description (str): The description.
+            dict_file (str|TextIO): The dictionary file, either as a filepath or a TextIO object.
+        Returns:
+            A PronunciationDictionary instance.
+        """
+        payload = {"name": name, "description":description}
+        if isinstance(dict_file, str):
+            dict_file = open(dict_file, "r")
+        files = list()
+        files.append(("file", dict_file))
+        response = _api_multipart("/pronunciation-dictionaries/add-from-file", headers=self.headers, data=payload, filesData=files)
+        return PronunciationDictionary.pdict_json_factory(response.json())
 
     def update_audio_quality(self):
         self._subscriptionTier = self.get_subscription_data()["tier"]
@@ -645,7 +740,6 @@ class User:
                     generationOptions.output_format = "pcm_24000"
 
         return generationOptions
-
 
 class ElevenLabsUser(User):
     def __init__(self, *args, **kwargs):
