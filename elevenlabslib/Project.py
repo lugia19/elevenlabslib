@@ -35,26 +35,53 @@ class Project:
     """
     def __init__(self, json_data, linked_user:User):
         self.linkedUser:User = linked_user
+
         self.project_id:str = json_data.get('project_id')
         self.name:str = json_data.get('name')
-        self.can_be_downloaded:bool = json_data.get('can_be_downloaded')
-        self.title:Optional[str] = json_data.get('title')
-        self.author:Optional[str] = json_data.get('author')
-        self.isbn_number:Optional[str] = json_data.get('isbn_number')
+
+        #Updatable information:
+        self.can_be_downloaded: bool = json_data.get('can_be_downloaded')
+        self.title: Optional[str] = json_data.get('title')
+        self.author: Optional[str] = json_data.get('author')
+        self.isbn_number: Optional[str] = json_data.get('isbn_number')
         self.volume_normalization = json_data.get('volume_normalization')
         self.state = json_data.get('state')
 
-        self.default_settings:Dict[str, Optional[str]] = {
+        self.default_settings: Dict[str, Optional[str]] = {
             'default_title_voice_id': json_data.get('default_title_voice_id'),
             'default_paragraph_voice_id': json_data.get('default_paragraph_voice_id'),
             'default_model_id': json_data.get('default_model_id')
         }
 
-        self.dates:Dict[str, str] = {
+        self.dates: Dict[str, str] = {
             'create_date_unix': json_data.get('create_date_unix'),
             'last_conversion_date_unix': json_data.get('last_conversion_date_unix')
         }
 
+
+    def update_data(self):
+        """
+        Updates the project's information.
+        """
+        response = _api_get(f"/projects/{self.project_id}", headers=self.linkedUser.headers)
+        json_data = response.json()
+        self.can_be_downloaded: bool = json_data.get('can_be_downloaded')
+        self.title: Optional[str] = json_data.get('title')
+        self.author: Optional[str] = json_data.get('author')
+        self.isbn_number: Optional[str] = json_data.get('isbn_number')
+        self.volume_normalization = json_data.get('volume_normalization')
+        self.state = json_data.get('state')
+
+        self.default_settings: Dict[str, Optional[str]] = {
+            'default_title_voice_id': json_data.get('default_title_voice_id'),
+            'default_paragraph_voice_id': json_data.get('default_paragraph_voice_id'),
+            'default_model_id': json_data.get('default_model_id')
+        }
+
+        self.dates: Dict[str, str] = {
+            'create_date_unix': json_data.get('create_date_unix'),
+            'last_conversion_date_unix': json_data.get('last_conversion_date_unix')
+        }
 
     def delete(self):
         """
@@ -92,6 +119,9 @@ class Project:
         """
         Gets the project's snapshots (audio versions).
         """
+        self.update_data()
+        if not self.can_be_downloaded:
+            return []   #No snapshots available.
         response = _api_get(f"/projects/{self.project_id}/snapshots", headers=self.linkedUser.headers)
         response_json = response.json()
         snapshots = list()
@@ -134,6 +164,18 @@ class Chapter:
 
         self.statistics:Optional[Dict[str, str]] = json_data.get('statistics')
 
+    def update_data(self):
+        """
+        Updates the chapter's data.
+        """
+        response = _api_get(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}", headers=self.project.linkedUser.headers)
+        json_data = response.json()
+        self.name: str = json_data.get('name')
+        self.last_conversion_date_unix: Optional[str] = json_data.get('last_conversion_date_unix')
+        self.conversion_progress: Optional[str] = json_data.get('conversion_progress')
+        self.can_be_downloaded: bool = json_data.get('can_be_downloaded')
+        self.state: str = json_data.get('state')
+        self.statistics: Optional[Dict[str, str]] = json_data.get('statistics')
 
     def delete(self):
         """
@@ -152,7 +194,12 @@ class Chapter:
         """
         Gets the chapter's snapshots (audio versions).
         """
+        self.update_data()
+        if not self.can_be_downloaded:  #No snapshots are available.
+            return []
+
         response = _api_get(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}/snapshots", headers=self.project.linkedUser.headers)
+
         response_json = response.json()
         chapter_snapshots = list()
         for chapter_snapshot_data in response_json["snapshots"]:
@@ -169,9 +216,6 @@ class Chapter:
                 return chapter_snapshot
 
         raise ValueError(f"No snapshot with id {chapter_snapshot_id} found!")
-
-    def update_pronunciation_dictionary(self):
-        pass
 
 class ProjectSnapshot(_PlayableItem):
     def __init__(self, json_data, parent_project: Project):
