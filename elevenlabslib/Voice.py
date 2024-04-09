@@ -271,7 +271,7 @@ class Voice:
             dict: A dictionary representing the payload for the API call.
             GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
-        voice_settings = generationOptions.get_voice_settings_dict()
+        voice_settings = self._complete_generation_options(generationOptions).get_voice_settings_dict()
 
         if websocketOptions is None:
             websocketOptions = WebsocketOptions()
