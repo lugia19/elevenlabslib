@@ -35,7 +35,6 @@ class Project:
     """
     def __init__(self, json_data, linked_user:User):
         self.linkedUser:User = linked_user
-
         self.project_id:str = json_data.get('project_id')
         self.name:str = json_data.get('name')
 
@@ -222,6 +221,7 @@ class ProjectSnapshot(_PlayableItem):
         super().__init__()
         self.project:Project = parent_project
         self.project_snapshot_id:str = json_data.get('project_snapshot_id')
+        #: The UNIX timestamp for when the snapshot was created.
         self.created_at_unix:str = json_data.get('created_at_unix')
         self.name:str = json_data.get('name')
 
@@ -235,6 +235,7 @@ class ChapterSnapshot(_PlayableItem):
         super().__init__()
         self.chapter:Chapter = parent_chapter
         self.chapter_snapshot_id:str = json_data.get('chapter_snapshot_id')
+        #: The UNIX timestamp for when the snapshot was created.
         self.created_at_unix:str = json_data.get('created_at_unix')
         self.name:str = json_data.get('name')
 

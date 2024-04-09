@@ -81,9 +81,7 @@ class Voice:
             linkedUser: An instance of the User class representing the linked user.
         """
         self._linkedUser = linkedUser
-        # This is the name at the time the object was created. It won't be updated.
-        # (Useful to iterate over all voices to find one with a specific name without spamming the API)
-        self.initialName = voiceData["name"]
+
         self.name = voiceData["name"]
         self.description = voiceData["description"]
         self.voiceID = voiceData["voice_id"]
