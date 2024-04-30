@@ -817,8 +817,11 @@ def _set_websocket_buffer_amount(websocket_options:WebsocketOptions, generation_
     Returns a new websocket_options with the correct buffer value.
     """
 
-    # Don't do anything if the user overwrote it.
+    # We no longer set any default value, as thanks to the new update, multiv2 is fast enough to not need any buffering.
     websocket_options = dataclasses.replace(websocket_options)
+    return websocket_options
+
+    # Don't do anything if the user overwrote it.
     if websocket_options.buffer_char_length == -1:
         if generation_options.model_id == "eleven_multilingual_v2":
             websocket_options.buffer_char_length = 90
