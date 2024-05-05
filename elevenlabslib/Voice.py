@@ -546,9 +546,13 @@ class Voice:
 
     def generate_audio_v2(self, prompt: Union[str, bytes, BinaryIO], generationOptions: GenerationOptions = GenerationOptions(), promptingOptions: PromptingOptions = None) -> tuple[bytes, str]:
         warn("Deprecated. Use generate_audio_v3 instead.", DeprecationWarning)
-        future, gen_options = self.generate_audio_v3(prompt, generationOptions, promptingOptions)
-        if gen_options:
-            history_id = gen_options.history_item_id
+        future, gen_info = self.generate_audio_v3(prompt, generationOptions, promptingOptions)
+        if gen_info:
+            if isinstance(gen_info, GenerationInfo):
+                history_id = gen_info.history_item_id
+            else:
+                gen_info = gen_info.result()
+                history_id = gen_info.history_item_id
         else:
             history_id = "no_history_id_available"
 
