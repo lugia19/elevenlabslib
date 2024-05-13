@@ -1,33 +1,9 @@
 from __future__ import annotations
 from typing import Dict, Optional, List
 
-from elevenlabslib import User
+from elevenlabslib import User, PronunciationDictionary
 from elevenlabslib.helpers import _api_del, _api_json, _api_get, _PlayableItem
 
-class PronunciationDictionary:
-    """
-    Represents a pronunciation dictionary. Can be created manually from stored IDs by using pronunciation_dictionary_from_ids.
-    """
-    @staticmethod
-    def pdict_json_factory(json_data):
-        """
-        Creates a complete PronunciationDictionary from the JSON data.
-        """
-        pdict = PronunciationDictionary(json_data.get("id"), json_data.get("version_id"))
-        pdict.created_by = json_data.get("created_by")
-        pdict.creation_time_unix = json_data.get("creation_time_unix")
-        pdict.description = json_data.get("description")
-        pdict.name = json_data.get("name")
-
-        return pdict
-
-    def __init__(self, pronunciation_dictionary_id:str, version_id:str):
-        self.created_by:Optional[str] = None
-        self.creation_time_unix:Optional[str] = None
-        self.description:Optional[str] = None
-        self.pronunciation_dictionary_id: str = pronunciation_dictionary_id
-        self.name:Optional[str] = None
-        self.version_id: str = version_id
 
 class Project:
     """

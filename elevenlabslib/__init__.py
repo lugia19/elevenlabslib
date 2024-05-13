@@ -10,7 +10,8 @@ from .HistoryItem import HistoryItem, ElevenLabsHistoryItem
 from .Model import Model, ElevenLabsModel
 from .helpers import GenerationOptions, PlaybackOptions, run_ai_speech_classifier, WebsocketOptions, Synthesizer, save_audio_v2, \
     PromptingOptions, ReusableInputStreamer, ReusableInputStreamerNoPlayback
-from .Project import Project, ProjectSnapshot, Chapter, ChapterSnapshot, PronunciationDictionary
+from .Project import Project, ProjectSnapshot, Chapter, ChapterSnapshot
+from .PronunciationDictionary import PronunciationDictionary, PronunciationRule, AliasRule, PhonemeRule
 
 __all__ = ["ElevenLabsUser","User",
            "ElevenLabsVoice", "Voice",
@@ -24,4 +25,5 @@ __all__ = ["ElevenLabsUser","User",
            "LibraryVoiceData",
            "GenerationOptions", "PlaybackOptions", "WebsocketOptions", "PromptingOptions",
            "run_ai_speech_classifier", "save_audio_v2", "Synthesizer", "ReusableInputStreamer", "ReusableInputStreamerNoPlayback",
-           "Project", "ProjectSnapshot", "Chapter", "ChapterSnapshot", "PronunciationDictionary"]
+           "Project", "ProjectSnapshot", "Chapter", "ChapterSnapshot",
+           "PronunciationDictionary", "PronunciationRule", "AliasRule", "PhonemeRule"]

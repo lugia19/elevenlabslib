@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, TextIO
 from fuzzywuzzy import process
 
 from elevenlabslib.Model import Model
-from elevenlabslib.Project import Project, PronunciationDictionary
+from elevenlabslib.Project import Project
+from elevenlabslib.PronunciationDictionary import PronunciationDictionary
 from elevenlabslib.Voice import ClonedVoice, ProfessionalVoice, LibraryVoiceData
 from elevenlabslib.Voice import EditableVoice
 from elevenlabslib.Voice import DesignedVoice
@@ -253,7 +254,7 @@ class User:
         return self.get_history_items_paginated(maxNumberOfItems=-1)
 
 
-    def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem: str | HistoryItem=None) -> list[HistoryItem]:
+    def get_history_items_paginated(self, maxNumberOfItems:int=100, startAfterHistoryItem: Union[str, HistoryItem]=None) -> list[HistoryItem]:
         """
         This function returns numberOfItems history items, starting from the newest (or the one specified with startAfterHistoryItem) and returning older ones.
 
@@ -711,7 +712,69 @@ class User:
         files = list()
         files.append(("file", dict_file))
         response = _api_multipart("/pronunciation-dictionaries/add-from-file", headers=self.headers, data=payload, filesData=files)
-        return PronunciationDictionary.pdict_json_factory(response.json())
+
+
+        return PronunciationDictionary(response.json(), self)
+
+    def get_pronunciation_dictionary(self, dictionary_id:str) -> PronunciationDictionary:
+        """
+        Args:
+            dictionary_id: The pronunciation dictionary ID.
+
+        Returns:
+            PronunciationDictionary: The corresponding PronunciationDictionary
+        """
+        response = _api_get(f"/pronunciation-dictionaries/{dictionary_id}", headers=self.headers)
+        return PronunciationDictionary(response.json(), self)
+
+    def get_pronunciation_dictionaries(self, max_number_of_items:int=30, start_after_dict:Union[str, PronunciationDictionary] = None) -> List[PronunciationDictionary]:
+        """
+            This function returns max_number_of_items pronunciation dictionaries, starting from the newest (or the one specified with start_after_dict) and returning older ones.
+
+            Args:
+                max_number_of_items (int): The maximum number of dictionaries to get. A value of 0 or less means all of them.
+                start_after_dict (str|PronunciationDictionary): The pronunciation dict (or its ID) from which to start returning dicts.
+            Returns:
+                list[PronunciationDictionary]: A list containing the requested pronunciation dictionaries.
+            """
+        params = {"page_size": max_number_of_items}
+        if start_after_dict:
+            params["cursor"] = start_after_dict if isinstance(start_after_dict, str) else start_after_dict.pronunciation_dictionary_id
+
+        if start_after_dict is not None:
+            if isinstance(start_after_dict, PronunciationDictionary):
+                start_after_dict = start_after_dict.pronunciation_dictionary_id
+            import base64
+            #Needs to be the dict id but base64 encoded.
+            params["cursor"] = base64.b64encode(bytes(start_after_dict, 'utf-8')).decode('utf-8')
+        pdicts = list()
+        singleRequestLimit = 100
+        downloadAll = max_number_of_items <= 0
+
+        while max_number_of_items > singleRequestLimit or downloadAll:
+            max_number_of_items -= singleRequestLimit
+            # Let's download limit amount of items and append them to the list
+            params["page_size"] = singleRequestLimit
+            response = _api_get("/pronunciation-dictionaries", headers=self._headers, params=params)
+            pdict_data = response.json()
+            for value in pdict_data["pronunciation_dictionaries"]:
+                pdicts.append(PronunciationDictionary(value, self))
+            # We got back at most singleRequestLimit items.
+            params["cursor"] = pdict_data["next_cursor"]
+
+            # In case we're done early.
+            if not pdict_data["has_more"]:
+                return pdicts
+
+        params["page_size"] = max_number_of_items
+        response = _api_get("/pronunciation-dictionaries", headers=self._headers, params=params)
+
+        pdict_data = response.json()
+
+        for value in pdict_data["pronunciation_dictionaries"]:
+            pdicts.append(PronunciationDictionary(value, self))
+
+        return pdicts
 
     def update_audio_quality(self):
         self._subscriptionTier = self.get_subscription_data()["tier"]
