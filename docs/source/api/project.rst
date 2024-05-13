@@ -15,7 +15,3 @@ Project
 .. autoclass:: elevenlabslib.ChapterSnapshot
     :members:
     :show-inheritance:
-
-
-.. autoclass:: elevenlabslib.PronunciationDictionary
-    :members:

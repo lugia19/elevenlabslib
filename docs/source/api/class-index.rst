@@ -8,4 +8,5 @@ Classes documentation
     historyitem.rst
     sample.rst
     project.rst
+    pronunciation-dictionary.rst
     :maxdepth: 3
