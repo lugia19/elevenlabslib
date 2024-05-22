@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from elevenlabslib.User import User
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _text_chunker, _reformat_transcript
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -345,7 +345,7 @@ class Voice:
         params = self._generate_parameters(generation_options)
         if isinstance(prompt, str):
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
-            requestFunction = lambda: _api_json("/text-to-speech/" + self.voiceID + "/stream", self._linkedUser.headers, jsonData=payload, params=params)
+            requestFunction = lambda: _api_json("/text-to-speech/" + self.voiceID + "/with-timestamps", self._linkedUser.headers, jsonData=payload, params=params)
         else:
             if "output_format" in params:
                 params.pop("output_format")
@@ -369,10 +369,15 @@ class Voice:
             def wrapped():
                 responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
                 response_headers = responseConnection.headers
+                responseData = responseConnection.content
+                response_dict  = json.loads(responseData.decode("utf-8"))
+                audioData = base64.b64decode(response_dict["audio_base64"])
+
                 info_future.set_result(GenerationInfo(history_item_id=response_headers.get("history-item-id"),
                                                 request_id=response_headers.get("request-id"),
-                                                tts_latency_ms=response_headers.get("tts-latency-ms")))
-                audioData = responseConnection.content
+                                                tts_latency_ms=response_headers.get("tts-latency-ms"),
+                                                transcript=_reformat_transcript(response_dict['alignment'])))
+
                 if "output_format" in params:
                     if "pcm" in params["output_format"]:
                         audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
@@ -409,7 +414,7 @@ class Voice:
         response_connection_future = concurrent.futures.Future()
         if isinstance(prompt, str): #Checking prompting_options is None is pointless, since if it's not None prompt will be an iterator anyway.
             payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
-            path = "/text-to-speech/" + self.voiceID + "/stream"
+            path = "/text-to-speech/" + self.voiceID + "/stream/with-timestamps"
             # Not using input streaming
             params = self._generate_parameters(generation_options)
             requestFunction = lambda: _api_json(path, headers=self._linkedUser.headers, jsonData=payload, stream=True, params=params)
@@ -477,7 +482,7 @@ class Voice:
         Returns:
             tuple[queue.Queue[numpy.ndarray], Optional[queue.Queue[str]], Optional[Future[OutputStream]], Optional[GenerationInfo]]:
                 - A queue containing the numpy audio data as float32 arrays.
-                - An optional queue for audio transcripts, populated if websocket streaming is used.
+                - An queue for audio transcripts.
                 - An optional future for controlling the playback, returned if playback is not disabled.
                 - An optional future containing a GenerationInfo with metadata about the audio generation.
         """
@@ -517,6 +522,8 @@ class Voice:
                                request_id=connection_headers.get("request-id"),
                                tts_latency_ms=connection_headers.get("tts-latency-ms")))
             threading.Thread(target=wrapper).start()
+            if isinstance(prompt, str):
+                transcript_queue = streamer.transcript_queue
         else:
             transcript_queue = streamer.transcript_queue
 
@@ -958,9 +965,26 @@ class _AudioStreamer:
         self.connection.raise_for_status()
         totalLength = 0
         logging.debug("Starting iter...")
-        for chunk in self.connection.iter_content(chunk_size=_downloadChunkSize):
-            self._stream_downloader_chunk_handler(chunk)
-            totalLength += len(chunk)
+        if isinstance(self._prompt, str):
+            #Handle with transcripts
+            for line in self.connection.iter_lines():
+                if line:  # filter out keep-alive new line
+                    response_dict = json.loads(line.decode("utf-8"))
+                    if response_dict["alignment"] is not None:
+                        formatted_list, self._current_audio_ms = _reformat_transcript(response_dict["alignment"], self._current_audio_ms)
+                        if self.transcript_queue is not None:
+                            print("ADDED TRANSCRIPT")
+                            self.transcript_queue.put(formatted_list)
+
+                    chunk = base64.b64decode(response_dict["audio_base64"])
+                    self._stream_downloader_chunk_handler(chunk)
+                    totalLength += len(chunk)
+            self.transcript_queue.put(None)  # We're done with the transcripts
+        else:
+            #Is STS, no transcript - old method
+            for chunk in self.connection.iter_content(chunk_size=_downloadChunkSize):
+                self._stream_downloader_chunk_handler(chunk)
+                totalLength += len(chunk)
 
         logging.debug("Download finished - " + str(totalLength) + ".")
         self._events["downloadDoneEvent"].set()
@@ -989,6 +1013,7 @@ class _AudioStreamer:
                 data = json.loads(self.connection.recv()) #We block because we know we're waiting on more messages.
                 alignment_data = data.get("normalizedAlignment", None)
                 if alignment_data is not None:
+                    #This is the block that handles buffering
                     if last_alignment_length is not None:
                         self._currentWebsocketChars += last_alignment_length
                     if self._currentWebsocketChars >= self.websocket_options.buffer_char_length:
@@ -998,22 +1023,9 @@ class _AudioStreamer:
                     else:
                         logging.debug(f"Still buffering, current char count: {self._currentWebsocketChars}/{self.websocket_options.buffer_char_length}")
                     last_alignment_length = len(alignment_data["chars"])
-                    formatted_list = list()
-                    for i in range(len(alignment_data["chars"])):
-                        new_char = {
-                            "character": alignment_data["chars"][i],
-                            "start_time_ms": alignment_data["charStartTimesMs"][i] + self._current_audio_ms,
-                            "duration_ms": alignment_data["charDurationsMs"][i]
-                        }
-                        formatted_list.append(new_char)
-                        if self._enable_cutout:
-                            if new_char["character"] == '"':
-                                if self._start_frame is None:
-                                    self._start_frame = math.ceil((new_char["start_time_ms"] + new_char["duration_ms"] * (1 - self._prompting_options.open_quote_duration_multiplier)) * self.sample_rate / 1000)
-                                else:
-                                    self._end_frame = math.floor((new_char["start_time_ms"] + new_char["duration_ms"] * self._prompting_options.close_quote_duration_multiplier) * self.sample_rate / 1000)
 
-                    self._current_audio_ms = formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
+                    #This is the block that handles re-formatting transcripts.
+                    formatted_list, self._current_audio_ms = _reformat_transcript(alignment_data, self._current_audio_ms)
 
                     if self.transcript_queue is not None:
                         self.transcript_queue.put(formatted_list)

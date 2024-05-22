@@ -384,6 +384,7 @@ class GenerationInfo:
     history_item_id: Optional[str] = None
     request_id: Optional[str] = None
     tts_latency_ms: Optional[str] = None
+    transcript: Optional[list[str]] = None
 
 class Synthesizer:
     """
@@ -1174,6 +1175,42 @@ def _text_chunker(chunks: Iterator[Union[str, dict]], generation_options:Generat
             buffer += chunk_text
     if buffer != "":
         yield {"text": apply_pronunciations(buffer + " ", generation_options), "try_trigger_generation": False, "flush": False} #We're at the end, so it's not like it actually matters.
+
+def _reformat_transcript(alignment_data, current_audio_ms=0) -> (list, int):
+    # This is the block that handles re-formatting transcripts.
+    formatted_list = list()
+    is_websocket_transcript = False
+    if "chars" in alignment_data:
+        is_websocket_transcript = True
+        char_array = alignment_data["chars"]
+    else:
+        char_array = alignment_data["characters"]
+
+    for i in range(len(char_array)):
+        if is_websocket_transcript:
+            new_char = {
+                "character": alignment_data["chars"][i],
+                "start_time_ms": alignment_data["charStartTimesMs"][i] + current_audio_ms,
+                "duration_ms": alignment_data["charDurationsMs"][i]
+            }
+        else:
+            new_char = {
+                "character": alignment_data["characters"][i],
+                "start_time_ms": alignment_data["character_start_times_seconds"][i]*1000 + current_audio_ms,
+                "duration_ms": alignment_data["character_end_times_seconds"][i]*1000
+            }
+        formatted_list.append(new_char)
+
+        # TODO: Remove cutout functionality - we have pre and post text now.
+        #if self._enable_cutout:
+        #    if new_char["character"] == '"':
+        #        if self._start_frame is None:
+        #            self._start_frame = math.ceil((new_char["start_time_ms"] + new_char["duration_ms"] * (1 - self._prompting_options.open_quote_duration_multiplier)) * self.sample_rate / 1000)
+        #        else:
+        #            self._end_frame = math.floor((new_char["start_time_ms"] + new_char["duration_ms"] * self._prompting_options.close_quote_duration_multiplier) * self.sample_rate / 1000)
+
+    new_audio_ms = formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
+    return formatted_list, new_audio_ms
 
 def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
     audio_hash = ""
