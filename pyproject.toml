@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elevenlabslib"
-version = "0.22.4"
+version = "0.22.5"
 authors = [
   { name="lugia19", email="lugia19@lugia19.com" },
 ]
@@ -22,7 +22,8 @@ dependencies=[
     "python-Levenshtein",
     "resampy",
     "appdirs",
-    "onnxruntime"
+    "onnxruntime",
+    "xmltodict"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
