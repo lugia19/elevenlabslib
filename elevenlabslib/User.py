@@ -195,8 +195,6 @@ class User:
         for voiceData in voicesData["voices"]:
             if voiceData["category"] == "cloned" and not canUseClonedVoices:
                 continue
-            if voiceData["category"] == "professional" and voiceData["fine_tuning"]["finetuning_state"] != "fine_tuned":
-                continue
             availableVoices.append(Voice.voiceFactory(voiceData, linkedUser=self))
 
         return availableVoices

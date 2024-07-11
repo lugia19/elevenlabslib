@@ -973,7 +973,6 @@ class _AudioStreamer:
                     if response_dict["alignment"] is not None:
                         formatted_list, self._current_audio_ms = _reformat_transcript(response_dict["alignment"], self._current_audio_ms)
                         if self.transcript_queue is not None:
-                            print("ADDED TRANSCRIPT")
                             self.transcript_queue.put(formatted_list)
 
                     chunk = base64.b64decode(response_dict["audio_base64"])
