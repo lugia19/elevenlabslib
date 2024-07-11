@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elevenlabslib"
-version = "0.22.3"
+version = "0.22.4"
 authors = [
   { name="lugia19", email="lugia19@lugia19.com" },
 ]
