@@ -376,7 +376,8 @@ class Voice:
                 info_future.set_result(GenerationInfo(history_item_id=response_headers.get("history-item-id"),
                                                 request_id=response_headers.get("request-id"),
                                                 tts_latency_ms=response_headers.get("tts-latency-ms"),
-                                                transcript=_reformat_transcript(response_dict['alignment'])))
+                                                transcript=_reformat_transcript(response_dict['alignment']),
+                                                character_cost=int(response_headers.get("character-cost", "-1"))))
 
                 if "output_format" in params:
                     if "pcm" in params["output_format"]:

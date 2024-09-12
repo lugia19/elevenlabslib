@@ -385,7 +385,27 @@ class GenerationInfo:
     request_id: Optional[str] = None
     tts_latency_ms: Optional[str] = None
     transcript: Optional[list[str]] = None
+    character_cost: Optional[int] = None
 
+@dataclasses.dataclass
+class SFXGenerationOptions:
+    """
+    This contains the parameters for a sound effect generation.
+    """
+    duration_seconds: Optional[float] = None
+    prompt_influence: Optional[float] = None
+    def __post_init__(self):
+        if self.duration_seconds and not (0.5 <= self.duration_seconds <= 22):
+            raise ValueError("Please input a valid duration (between 0.5 and 22).")
+        if self.prompt_influence and not (0 <= self.prompt_influence <= 1):
+            raise ValueError("Please input a valid prompt influence (between 0 and 1).")
+
+@dataclasses.dataclass
+class SFXGenerationInfo:
+    """
+    This contains the info for a sound effect generation.
+    """
+    character_cost: int
 class Synthesizer:
     """
     This is a helper class, which allows you to queue up multiple audio generations.

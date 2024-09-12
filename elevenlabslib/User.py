@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 from elevenlabslib.Voice import Voice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_get, _api_multipart, _PeekQueue
+from elevenlabslib.helpers import _api_json, _api_get, _api_multipart, _PeekQueue, _api_tts_with_concurrency
 
 
 class User:
@@ -773,6 +773,44 @@ class User:
             pdicts.append(PronunciationDictionary(value, self))
 
         return pdicts
+
+    def generate_sfx(self, prompt: str, sfx_generation_options: SFXGenerationOptions = SFXGenerationOptions()) -> \
+            tuple[Future[bytes], Future[SFXGenerationInfo]]:
+        """
+        Generates a sound effect from a text prompt and returns the audio data as bytes.
+
+        Tip:
+            If you would like to save the audio to disk or otherwise, you can use helpers.save_audio_bytes().
+
+        Args:
+            prompt (str): The text prompt..
+            sfx_generation_options (SFXGenerationOptions): Options for the SFX generation, such as duration, prompt adherence.
+        Returns:
+            tuple[Future[bytes], Optional[SFXGenerationInfo]]:
+            - A future that will contain the bytes of the audio file once the generation is complete.
+            - An optional future that will contain information about the generation.
+        """
+        payload = {"text": prompt}
+        if sfx_generation_options.duration_seconds:
+            payload["duration_seconds"] = sfx_generation_options.duration_seconds
+        if sfx_generation_options.prompt_influence:
+            payload["prompt_influence"] = sfx_generation_options.prompt_influence
+
+        generationID = f"SFX - {prompt} - {time.time()}"
+        requestFunction = lambda: _api_json("/sound-generation", self.headers, jsonData=payload)
+
+        audio_future = concurrent.futures.Future()
+        info_future = concurrent.futures.Future()
+
+        def wrapped():
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self.generation_queue)
+            response_headers = responseConnection.headers
+            responseData = responseConnection.content
+            info_future.set_result(SFXGenerationInfo(int(response_headers.get("character-cost", "-1"))))
+            audio_future.set_result(responseData)
+        threading.Thread(target=wrapped).start()
+
+        return audio_future, info_future
 
     def update_audio_quality(self):
         self._subscriptionTier = self.get_subscription_data()["tier"]
