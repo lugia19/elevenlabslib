@@ -125,6 +125,13 @@ class Project:
         }
         response = _api_json(f"/projects/{self.project_id}/update-pronunciation-dictionaries", headers=self.linkedUser.headers, jsonData=payload)
 
+    def add_chapter(self, name:str, from_url:str=None) -> Chapter:
+        payload = {"name": name,}
+        if from_url:
+            payload["from_url"] = from_url
+        response = _api_json(f"/projects/{self.project_id}/chapters/add", headers=self.linkedUser.headers, jsonData=payload)
+        return Chapter(response.json()["chapter"], self)
+
 
 
 class Chapter:
