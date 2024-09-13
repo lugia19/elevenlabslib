@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import mimetypes
 import zipfile
 
@@ -922,6 +923,45 @@ class User:
                     generationOptions.output_format = "pcm_24000"
 
         return generationOptions
+
+    def get_usage_stats(self, start_time:Union[datetime.datetime, int], end_time:Union[datetime.datetime, int]=None,
+                        include_workspace_metrics:bool=False, breakdown_type:Optional[str]="voice"):
+        """
+        Returns the usage stats for the user.
+        Parameters:
+            start_time (datetime.datetime|int): The start of the usage window
+            end_time (datetime.datetime|int, Optional): The end of the usage window. Defaults to today's date.
+            include_workspace_metrics (bool, Optional): Whether to include workspace metrics. Defaults to false.
+            breakdown_type (str, Optional): How to break down the results. Must be one of none, voice, user, api_keys, product_type.
+
+        Returns:
+            A tuple containing:
+                -The data formatted as a dict with datetime objects as keys
+                -The data in its raw format
+        """
+        if not end_time:
+            end_time = datetime.datetime.combine(datetime.datetime.today().date(), datetime.time(23, 59, 59))
+
+        params = {
+            "start_unix": int(start_time) if isinstance(start_time, int) or isinstance(end_time, float) else int(start_time.timestamp()*1000),
+            "end_unix": int(end_time) if isinstance(end_time, int) or isinstance(end_time, float) else int(end_time.timestamp()*1000),
+            "include_workspace_metrics": include_workspace_metrics,
+            "breakdown_type": breakdown_type
+        }
+
+        raw_data = _api_get("usage/character-stats", headers=self.headers, params=params).json()
+
+        transformed_data = {}
+        for i, timestamp in enumerate(raw_data['time']):
+            date = datetime.datetime.fromtimestamp(timestamp / 1000)
+            if date not in transformed_data:
+                transformed_data[date] = {}
+            for name, usage_list in raw_data['usage'].items():
+                transformed_data[date][name] = usage_list[i]
+        return transformed_data, raw_data
+
+
+
 
 class ElevenLabsUser(User):
     def __init__(self, *args, **kwargs):
