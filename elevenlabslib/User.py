@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 from elevenlabslib.Voice import Voice
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_get, _api_multipart, _PeekQueue, _api_tts_with_concurrency
+from elevenlabslib.helpers import _api_json, _api_get, _api_multipart, _PeekQueue, _api_tts_with_concurrency, _NumpyPlaybacker, _NumpyMp3Streamer
 
 
 class User:
@@ -775,7 +775,7 @@ class User:
         return pdicts
 
     def generate_sfx(self, prompt: str, sfx_generation_options: SFXGenerationOptions = SFXGenerationOptions()) -> \
-            tuple[Future[bytes], Future[SFXGenerationInfo]]:
+            tuple[Future[bytes], Future[GenerationInfo]]:
         """
         Generates a sound effect from a text prompt and returns the audio data as bytes.
 
@@ -786,7 +786,7 @@ class User:
             prompt (str): The text prompt..
             sfx_generation_options (SFXGenerationOptions): Options for the SFX generation, such as duration, prompt adherence.
         Returns:
-            tuple[Future[bytes], Optional[SFXGenerationInfo]]:
+            tuple[Future[bytes], Optional[GenerationInfo]]:
             - A future that will contain the bytes of the audio file once the generation is complete.
             - An optional future that will contain information about the generation.
         """
@@ -806,11 +806,94 @@ class User:
             responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self.generation_queue)
             response_headers = responseConnection.headers
             responseData = responseConnection.content
-            info_future.set_result(SFXGenerationInfo(int(response_headers.get("character-cost", "-1"))))
+            info_future.set_result(GenerationInfo(character_cost=int(response_headers.get("character-cost", "-1"))))
             audio_future.set_result(responseData)
         threading.Thread(target=wrapped).start()
 
         return audio_future, info_future
+
+    def isolate_audio(self, audio:Union[bytes, io.BytesIO]) -> tuple[Future[bytes], Future[GenerationInfo]]:
+        """
+        Isolate the voice in the given audio.
+
+        Parameters:
+            audio (Union[bytes, io.BytesIO]): The audio to isolate voice from.
+        Returns:
+            tuple[Future[bytes], Optional[GenerationInfo]]:
+                - A future that will contain the bytes of the audio file once the generation is complete.
+                - An optional future that will contain the GenerationInfo object for the generation.
+        """
+        path = "/audio-isolation/stream"
+        source_audio, _ = io_hash_from_audio(audio)
+        audio_future, generation_info_future = concurrent.futures.Future(), concurrent.futures.Future()
+        files = {"audio": source_audio}
+        def wrapper():
+            responseConnection = _api_multipart(path, headers=self.headers, data={}, stream=True, filesData=files)
+            response_headers = responseConnection.headers
+            audio_data = responseConnection.content
+
+            generation_info_future.set_result(GenerationInfo(character_cost=int(response_headers.get("character-cost", "-1"))))
+
+            audio_future.set_result(audio_data)
+        threading.Thread(target=wrapper).start()
+
+        return audio_future, generation_info_future
+
+    def isolate_audio_stream(self,
+                             audio:Union[bytes, io.BytesIO],
+                             playback_options: PlaybackOptions = PlaybackOptions(),
+                             disable_playback: bool = False
+                             ) -> tuple[queue.Queue[numpy.ndarray], Optional[Future[sounddevice.OutputStream]], Future[GenerationInfo]]:
+        """
+        Isolate the voice in the given audio and stream the result.
+
+        Parameters:
+            audio (Union[bytes, io.BytesIO]): The audio to isolate voice from.
+            playback_options (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
+            disable_playback (bool, optional): Allows you to disable playback altogether.
+        Returns:
+            tuple[queue.Queue[numpy.ndarray], Optional[Future[OutputStream]], Future[GenerationInfo]]:
+                - A queue containing the numpy audio data as float32 arrays.
+                - An optional future for controlling the playback, returned if playback is not disabled.
+                - An future containing a GenerationInfo with metadata.
+        """
+
+        response_connection_future = concurrent.futures.Future()
+        path = "/audio-isolation/stream"
+        source_audio, _ = io_hash_from_audio(audio)
+        dummy_gen_options = GenerationOptions(output_format="mp3_44100_192")  # Used to indicate the audio format
+        files = {"audio": source_audio}
+
+        def wrapper():
+            response_connection_future.set_result(_api_multipart(path, headers=self.headers, data={}, stream=True, filesData=files))
+
+        threading.Thread(target=wrapper).start()
+        streamer = _NumpyMp3Streamer(response_connection_future, dummy_gen_options, None, audio, None)
+
+        audio_stream_future = None
+
+        if disable_playback:
+            mainThread = threading.Thread(target=streamer.begin_streaming)
+            mainThread.start()
+        else:
+            audio_stream_future = concurrent.futures.Future()
+            player = _NumpyPlaybacker(streamer.playback_queue, playback_options, dummy_gen_options)
+            threading.Thread(target=streamer.begin_streaming).start()
+
+            if playback_options.runInBackground:
+                playback_thread = threading.Thread(target=player.begin_playback, args=(audio_stream_future,))
+                playback_thread.start()
+            else:
+                player.begin_playback(audio_stream_future)
+
+        generation_info_future = concurrent.futures.Future()
+
+        def wrapper():
+            connection_headers = streamer.connection_future.result().headers
+            generation_info_future.set_result(GenerationInfo(character_cost=int(connection_headers.get("character-cost", "-1"))))
+        threading.Thread(target=wrapper).start()
+
+        return streamer.userfacing_queue, audio_stream_future, generation_info_future
 
     def update_audio_quality(self):
         self._subscriptionTier = self.get_subscription_data()["tier"]
