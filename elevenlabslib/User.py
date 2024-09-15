@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import io
 import mimetypes
 import zipfile
 
@@ -8,6 +9,7 @@ from typing import TYPE_CHECKING, TextIO
 
 from fuzzywuzzy import process
 
+from elevenlabslib.Dub import Dub
 from elevenlabslib.Model import Model
 from elevenlabslib.Project import Project
 from elevenlabslib.PronunciationDictionary import PronunciationDictionary
@@ -162,7 +164,7 @@ class User:
                 return Model(modelData, self)
         raise ValueError("This model does not exist or is not available for your account.")
 
-    def get_all_voices(self) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
+    def get_all_voices(self, show_legacy:bool=True) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
         """
         Gets a list of all voices registered to this account.
 
@@ -173,7 +175,7 @@ class User:
         Returns:
             list[Voice]: A list containing all the voices.
         """
-        response = _api_get("/voices", headers=self._headers)
+        response = _api_get("/voices", headers=self._headers, params={"show_legacy":show_legacy})
         allVoices: list[Voice] = list()
         voicesData = response.json()
         from elevenlabslib.Voice import Voice
@@ -181,14 +183,14 @@ class User:
             allVoices.append(Voice.voiceFactory(voiceData, self))
         return allVoices
 
-    def get_available_voices(self) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
+    def get_available_voices(self, show_legacy:bool=True) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
         """
         Gets a list of voices this account can currently use for TTS.
 
         Returns:
             list[Voice]: A list of currently usable voices.
         """
-        response = _api_get("/voices", headers=self._headers)
+        response = _api_get("/voices", headers=self._headers, params={"show_legacy":show_legacy})
         voicesData = response.json()
         availableVoices = list()
         canUseClonedVoices = self.get_voice_clone_available()
@@ -210,15 +212,10 @@ class User:
         Returns:
             Voice|DesignedVoice|ClonedVoice|ProfessionalVoice: The requested voice.
         """
-        response = _api_get("/voices/" + voiceID, headers=self._headers, params={"with_settings":True})
+        response = _api_get("/voices/" + voiceID, headers=self._headers, params={"with_settings":True, "show_legacy":True})
         voiceData = response.json()
         from elevenlabslib.Voice import Voice
         return Voice.voiceFactory(voiceData, self)
-
-    def get_voices_by_name(self, voiceName: str) -> list[Voice | DesignedVoice | ClonedVoice | ProfessionalVoice]:
-        warn("This function is deprecated. Please use get_voices_by_name_v2() instead, which uses fuzzy matching.", DeprecationWarning)
-        matches = self.get_voices_by_name_v2(voiceName, score_threshold=100)
-        return matches
 
     def get_voices_by_name_v2(self, voiceName: str, score_threshold:int=75) -> list[Voice | EditableVoice | ClonedVoice | ProfessionalVoice]:
         """
@@ -234,7 +231,7 @@ class User:
         Returns:
             list[Voice|DesignedVoice|ClonedVoice]: A list of matching voices.
         """
-        response = _api_get("/voices", headers=self._headers)
+        response = _api_get("/voices", headers=self._headers, params={"show_legacy": True})
         voicesData = response.json()
 
         from elevenlabslib.Voice import Voice
@@ -813,12 +810,12 @@ class User:
 
         return audio_future, info_future
 
-    def isolate_audio(self, audio:Union[bytes, io.BytesIO]) -> tuple[Future[bytes], Future[GenerationInfo]]:
+    def isolate_audio(self, audio:Union[bytes, BinaryIO]) -> tuple[Future[bytes], Future[GenerationInfo]]:
         """
         Isolate the voice in the given audio.
 
         Parameters:
-            audio (Union[bytes, io.BytesIO]): The audio to isolate voice from.
+            audio (bytes|BinaryIO): The audio to isolate voice from.
         Returns:
             tuple[Future[bytes], Optional[GenerationInfo]]:
                 - A future that will contain the bytes of the audio file once the generation is complete.
@@ -841,7 +838,7 @@ class User:
         return audio_future, generation_info_future
 
     def isolate_audio_stream(self,
-                             audio:Union[bytes, io.BytesIO],
+                             audio:Union[bytes, BinaryIO],
                              playback_options: PlaybackOptions = PlaybackOptions(),
                              disable_playback: bool = False
                              ) -> tuple[queue.Queue[numpy.ndarray], Optional[Future[sounddevice.OutputStream]], Future[GenerationInfo]]:
@@ -849,7 +846,7 @@ class User:
         Isolate the voice in the given audio and stream the result.
 
         Parameters:
-            audio (Union[bytes, io.BytesIO]): The audio to isolate voice from.
+            audio (bytes|BinaryIO): The audio to isolate voice from.
             playback_options (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             disable_playback (bool, optional): Allows you to disable playback altogether.
         Returns:
@@ -960,8 +957,82 @@ class User:
                 transformed_data[date][name] = usage_list[i]
         return transformed_data, raw_data
 
+    def create_dub(self, name: str, target_lang: str, source_url: str = "", source_file_path: str= None, source_lang: str = "auto", num_speakers: int = 0,
+                   watermark: bool = False, start_time: int = None, end_time: int = None, highest_resolution: bool = False,
+                   drop_background_audio: bool = False, use_profanity_filter: bool = False) -> Tuple[Dub, int]:
+        """
+        Dubs a video or an audio file into the given language.
+
+        Args:
+            name (str): Name of the dubbing project.
+            target_lang (str): The target language to dub the content into.
+            source_url (str): URL of the source video/audio file.
+            source_file_path (str, optional): File path of the audio/video file to dub. If provided, it will be used instead of source_url.
+            source_lang (str, optional): Source language. Defaults to "auto".
+            num_speakers (int, optional): Number of speakers to use for the dubbing. Set to 0 to automatically detect the number of speakers. Defaults to 0.
+            watermark (bool, optional): Whether to apply a watermark to the output video. Defaults to False.
+            start_time (int, optional): Start time of the source video/audio file.
+            end_time (int, optional): End time of the source video/audio file.
+            highest_resolution (bool, optional): Whether to use the highest resolution available. Defaults to False.
+            drop_background_audio (bool, optional): An advanced setting. Whether to drop background audio from the final dub. Defaults to False.
+            use_profanity_filter (bool, optional): [BETA] Whether transcripts should have profanities censored with the words '[censored]'. Defaults to False.
+
+        Returns:
+            dict: A dictionary containing the dubbing_id and expected_duration_sec of the dubbing task.
+        """
+        if source_url == "":
+            source_url = None
+        payload = {
+            "name": name,
+            "source_url": source_url,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "num_speakers": num_speakers,
+            "watermark": watermark,
+            "highest_resolution": highest_resolution,
+            "drop_background_audio": drop_background_audio,
+            "use_profanity_filter": use_profanity_filter
+        }
+        if start_time is not None:
+            payload["start_time"] = start_time
+        if end_time is not None:
+            payload["end_time"] = end_time
+
+        files = None
+        if source_file_path is not None:
+            payload.pop("source_url")
+            mime_type, _ = mimetypes.guess_type(source_file_path)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+            files = {"file": (os.path.basename(source_file_path), open(source_file_path, "rb"), mime_type)}
 
 
+        if not source_file_path and not source_url:
+            raise ValueError("You have to specify either source_file or source_url!")
+
+        response = _api_multipart("/dubbing", headers=self.headers, data=payload, filesData=files)
+        response_data = response.json()
+
+        dub_data = {
+            "dubbing_id": response_data["dubbing_id"],
+            "name": name,
+            "status": "in_progress",
+            "target_languages": [target_lang]
+        }
+
+        return Dub(dub_data, self, response_data["expected_duration_sec"]), response_data["expected_duration_sec"]
+    def get_dub_by_id(self, dubbing_id: str) -> Dub:
+        """
+        Returns metadata about a dubbing project, including whether it's still in progress or not.
+
+        Args:
+            dubbing_id (str): ID of the dubbing project.
+
+        Returns:
+            dict: A dictionary containing the metadata of the dubbing project.
+        """
+        response = _api_get(f"/dubbing/{dubbing_id}", headers=self.headers)
+        return Dub(response.json(), self)
 
 class ElevenLabsUser(User):
     def __init__(self, *args, **kwargs):
