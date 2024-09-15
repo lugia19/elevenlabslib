@@ -29,6 +29,7 @@ class HistoryItem(_PlayableItem):
         super().__init__()
         self._parentUser:User = parentUser
         self.historyID = data["history_item_id"]
+        self.requestID = data["request_id"]
         self._voiceId = data["voice_id"]
         self.voiceName = data["voice_name"]
         self._voiceCategory = data["voice_category"]
@@ -40,6 +41,7 @@ class HistoryItem(_PlayableItem):
         self._settingsUsed = data["settings"]
         self._fullMetadata = data
         self._source = data["source"]
+        self.alignments = data["alignments"]
 
     @property
     def metadata(self):
