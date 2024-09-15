@@ -201,17 +201,30 @@ class Voice:
         if isinstance(prompt, str):
             payload = {
                 "model_id": model_id,
-                "text": apply_pronunciations(prompt, generationOptions)
+                "text": prompt,
+                "seed": generationOptions.seed,
+                "language_code": generationOptions.language_code
             }
         else:
             if "sts" not in model_id:
                 model_id = default_sts_model
             payload = {"model_id": model_id}
 
+        if generationOptions.pronunciation_dictionaries:
+            payload["pronunciation_dictionary_locators"] = []
+            for dictionary in generationOptions.pronunciation_dictionaries:
+                payload["pronunciation_dictionary_locators"].append({
+                    "pronunciation_dictionary_id": dictionary.pronunciation_dictionary_id,
+                    "version_id": dictionary.version_id
+                })
+
         if isinstance(prompt, str):
             payload["voice_settings"] = voice_settings
         else:
             payload["voice_settings"] = json.dumps(voice_settings)
+        for key, value in payload.items():
+            if value is None:
+                payload.pop(key)
 
         return payload, generationOptions
 
@@ -261,6 +274,10 @@ class Voice:
         for key, value in self._generate_parameters(generationOptions).items():
             websocketURL += f"&{key}={value}"
         websocketURL += f"&enable_ssml_parsing={str(websocketOptions.enable_ssml_parsing).lower()}"
+
+        if generationOptions.language_code:
+            websocketURL += f"&language_code={generationOptions.language_code}"
+
         websocket = connect(
             websocketURL,
             additional_headers=self.linkedUser.headers

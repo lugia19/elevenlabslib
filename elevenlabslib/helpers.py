@@ -4,6 +4,7 @@ import asyncio
 import audioop
 import base64
 import concurrent.futures
+import warnings
 from concurrent.futures import Future
 import dataclasses
 import inspect
@@ -36,7 +37,7 @@ _playbackBlockSize = 2048
 _downloadChunkSize = 4096
 
 if TYPE_CHECKING:
-    from elevenlabslib import Voice
+    from elevenlabslib import Voice, HistoryItem, PronunciationDictionary
     from elevenlabslib.Model import Model
 from elevenlabslib._audio_cutter_helper import split_audio
 
@@ -271,7 +272,9 @@ class GenerationOptions:
         style (float, optional): A float between 0 and 1 representing how much focus should be placed on the text vs the associated audio data for the voice's style, with 0 being all text and 1 being all audio.
         use_speaker_boost (bool, optional): Boost the similarity of the synthesized speech and the voice at the cost of some generation speed.
         output_format (str, optional): Output format for the audio. mp3_highest and pcm_highest will automatically use the highest quality of that format you have available.
-        forced_pronunciations (dict, optional): A dict specifying custom pronunciations for words. The key is the word, with the 'alphabet' and 'pronunciation' values required. This will replace it in the prompt directly.
+        pronunciation_dictionaries (List[PronunciationDictionary], optional): The pronunciation dictionaries to apply to this request (max 3).
+        seed (int, optional): The seed. to use for this generation (Determinism is not guaranteed)
+        language_code (str, optional): An ISO 639-1 code, used to enforce a language for the model. Currently turbo v2.5 only.
     Note:
         The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
 
@@ -295,7 +298,9 @@ class GenerationOptions:
     use_speaker_boost: Optional[bool] = None
     model: Optional[Union[Model, str]] = "eleven_monolingual_v1"
     output_format:str = "mp3_highest"
-    forced_pronunciations:Optional[dict] = None
+    seed:Optional[int] = None
+    language_code: Optional[str] = None
+    pronunciation_dictionaries: Optional[List[PronunciationDictionary]] = None
 
     def __post_init__(self):
         if self.model_id:
@@ -307,14 +312,6 @@ class GenerationOptions:
                 self.model_id = self.model.modelID
 
         #Validate values
-        if self.forced_pronunciations:
-            valid_alphabets =  ["ipa","cmu-arpabet"]
-            for key, value in self.forced_pronunciations.items():
-                if not isinstance(value, dict) or "alphabet" not in value or "pronunciation" not in value:
-                    raise ValueError(f"Please ensure that each value in custom_pronunciations is a dict containing 'alphabet' and 'pronunciation' values (Error raised due to {key}).")
-                value["alphabet"] = value["alphabet"].lower()
-                if value["alphabet"] not in valid_alphabets:
-                    raise ValueError(f"Please specify a valid alphabet for {key}. Valid values are: {valid_alphabets}")
         for var in [self.stability, self.similarity_boost, self.style]:
             if var is not None and (var < 0 or var > 1):
                 raise ValueError("Please provide a value between 0 and 1 for stability, similarity_boost, and style.")
@@ -335,18 +332,6 @@ class GenerationOptions:
             "use_speaker_boost":self.use_speaker_boost
         }
 
-def apply_pronunciations(text:str, generation_options:GenerationOptions) -> str:
-    supported_models = ["eleven_monolingual_v1", "eleven_turbo_v2"]
-    if generation_options.model_id not in supported_models:
-        return text
-
-    if generation_options.forced_pronunciations:
-        for word, value in generation_options.forced_pronunciations.items():
-            constructed_string = f'<phoneme alphabet="{value["alphabet"]}" ph="{value["pronunciation"]}">{word}</phoneme>'
-            text = text.replace(word, constructed_string)
-
-    return text
-
 @dataclasses.dataclass
 class WebsocketOptions:
     """
@@ -366,37 +351,37 @@ class WebsocketOptions:
                 raise ValueError("Chunk length outside the [50,500] range.")
 
 @dataclasses.dataclass
-class PromptingOptions:
+class StitchingOptions:
     """
-    This class holds the options for pre/post-prompting the audio, to add emotion.
+    This class holds the options for request stitching and prompting.
 
     Parameters:
-        pre_prompt (str, optional): Prompt which will be place before the quoted text.
-        post_prompt (str, optional): Prompt which will be placed after the quoted text.
-        open_quote_duration_multiplier (float, optional): Multiplier indicating how much of the opening quote will be spoken (Between 0 and 1). Defaults to 0.70 if a pre-prompt is present to avoid bleedover.
-        close_quote_duration_multiplier (float, optional): Multiplier for the duration of the closing quote (Between 0 and 1). Defaults to 0.70 if a post-prompt is present to avoid bleedover.
+        previous_text (str, optional): Prompt which will be place before the quoted text.
+        next_text (str, optional): Prompt which will be placed after the quoted text.
+        previous_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated before this generation. Overrides previous_text.
+        next_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated after this generation. Overrides next_text.
     """
-    pre_prompt:str = ""
-    post_prompt:str = ""
-    open_quote_duration_multiplier: Optional[float] = None
-    close_quote_duration_multiplier:Optional[float] = None
+    previous_text:str = ""
+    next_text:str = ""
+    previous_request_ids: Optional[List[Union[int, HistoryItem]]] = None
+    next_request_ids:Optional[List[Union[int, HistoryItem]]] = None
 
-    def __post_init__(self):
-        if "\"" in self.pre_prompt or "\"" in self.post_prompt:
-            raise ValueError("Please do not include any quotes (\") in the post/pre-prompt.")
-        if self.close_quote_duration_multiplier is None:
-            if self.post_prompt != "":
-                self.close_quote_duration_multiplier = 0.50
-            else:
-                self.close_quote_duration_multiplier = 1
 
-        if self.open_quote_duration_multiplier is None:
-            if self.pre_prompt != "":
-                self.open_quote_duration_multiplier = 0.50
-            else:
-                self.open_quote_duration_multiplier = 1
-        elif self.close_quote_duration_multiplier > 1:
-            raise ValueError("Please input a valid value for last_character_duration_multiplier (between 0 and 1).")
+def PromptingOptions(pre_prompt: str = "", post_prompt: str = "",
+                     open_quote_duration_multiplier: Optional[float] = None,
+                     close_quote_duration_multiplier: Optional[float] = None):
+    warnings.warn(
+        "PromptingOptions is deprecated. Use StitchingOptions instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    # Create and return a StitchingOptions instance
+    return StitchingOptions(
+        previous_text=pre_prompt,
+        next_text=post_prompt
+    )
+
 
 @dataclasses.dataclass
 class GenerationInfo:
@@ -1192,23 +1177,23 @@ def _text_chunker(chunks: Iterator[Union[str, dict]], generation_options:Generat
 
         if buffer.endswith(splitters):
             if buffer.endswith(" "):
-                yielded_dict["text"] = apply_pronunciations(buffer, generation_options)
+                yielded_dict["text"] = buffer
             else:
-                yielded_dict["text"] = apply_pronunciations(buffer + " ", generation_options)
+                yielded_dict["text"] = buffer + " "
             yield yielded_dict
             buffer = chunk_text
         elif chunk_text.startswith(splitters):
             output = buffer + chunk_text[0]
             if output.endswith(" "):
-                yielded_dict["text"] = apply_pronunciations(output, generation_options)
+                yielded_dict["text"] = output
             else:
-                yielded_dict["text"] = apply_pronunciations(output + " ", generation_options)
+                yielded_dict["text"] = output + " "
             yield yielded_dict
             buffer = chunk_text[1:]
         else:
             buffer += chunk_text
     if buffer != "":
-        yield {"text": apply_pronunciations(buffer + " ", generation_options), "try_trigger_generation": False, "flush": False} #We're at the end, so it's not like it actually matters.
+        yield {"text": buffer + " ", "try_trigger_generation": False, "flush": False} #We're at the end, so it's not like it actually matters.
 
 def _reformat_transcript(alignment_data, current_audio_ms=0) -> (list, int):
     # This is the block that handles re-formatting transcripts.
