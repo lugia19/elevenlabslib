@@ -7,9 +7,9 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'elevenlabslib'
-copyright = '2023, lugia19'
+copyright = '2024, lugia19'
 author = 'lugia19'
-release = '0.12.0'
+release = '0.24.0'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 

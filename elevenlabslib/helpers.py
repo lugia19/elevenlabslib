@@ -147,23 +147,6 @@ class LibSort(Enum):
     MOST_USERS = "cloned_by_count"
     MOST_CHARACTERS_GENERATED = "usage_character_count_1y"
 
-def edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
-    """
-    This function lets you override the default values used for the streaming functions.
-
-    Danger:
-        Please only do this if you know what you're doing.
-
-    Parameters:
-        playbackBlockSize (int): The size (in frames) of the blocks used for playback.
-        downloadChunkSize (int): The size (in bytes) of the chunks to be downloaded.
-    """
-    global _playbackBlockSize, _downloadChunkSize
-    if playbackBlockSize is not None:
-        _playbackBlockSize = playbackBlockSize
-    if downloadChunkSize is not None:
-        _downloadChunkSize = downloadChunkSize
-
 def _api_call_v2(requestMethod, argsDict) -> requests.Response:
     path = argsDict["path"]
     if path[0] != "/":
@@ -272,10 +255,6 @@ class GenerationOptions:
         pronunciation_dictionaries (List[PronunciationDictionary], optional): The pronunciation dictionaries to apply to this request (max 3).
         seed (int, optional): The seed. to use for this generation (Determinism is not guaranteed)
         language_code (str, optional): An ISO 639-1 code, used to enforce a language for the model. Currently turbo v2.5 only.
-    Note:
-        The latencyOptimizationLevel ranges from 0 to 4. Each level trades off some more quality for speed.
-
-        Level 4 might also mispronounce numbers/dates.
 
     Warning:
         The style and use_speaker_boost parameters are only available on v2 models, and will be ignored for v1 models.
@@ -412,8 +391,9 @@ class SFXOptions:
 def run_ai_speech_classifier(audioBytes:bytes):
     """
     Runs Elevenlabs' AI speech classifier on the provided audio data.
+
     Parameters:
-        audioBytes: The bytes of the audio file (mp3, wav, most formats should work) you want to analzye
+        audioBytes: The bytes of the audio file (mp3, wav, most formats should work) you want to analyze.
 
     Returns:
         Dict containing all the information returned by the tool (usually just the probability of it being AI generated)
@@ -489,7 +469,7 @@ def _audio_is_raw(audioData:bytes):
     except soundfile.LibsndfileError:
         return True
 
-def raw_to_wav(rawData:bytes, samplerate:int, subtype:str) -> bytes:
+def _raw_to_wav(rawData:bytes, samplerate:int, subtype:str) -> bytes:
     # Let's make sure the user didn't just forward a tuple from one of the other functions...
     if isinstance(rawData, tuple):
         for item in rawData:
@@ -501,7 +481,7 @@ def raw_to_wav(rawData:bytes, samplerate:int, subtype:str) -> bytes:
     sf.write(wavIO, soundFile.read(), soundFile.samplerate, format="wav")
 
     return wavIO.getvalue()
-def ulaw_to_wav(ulawData:bytes, samplerate:int) -> bytes:
+def _ulaw_to_wav(ulawData:bytes, samplerate:int) -> bytes:
     """
     This function converts ULAW audio to a WAV.
 
@@ -512,8 +492,8 @@ def ulaw_to_wav(ulawData:bytes, samplerate:int) -> bytes:
     Returns:
         The bytes of the wav file.
     """
-    return raw_to_wav(ulawData, samplerate, "ULAW")
-def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
+    return _raw_to_wav(ulawData, samplerate, "ULAW")
+def _pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
     """
     This function converts PCM audio to a WAV.
 
@@ -525,7 +505,7 @@ def pcm_to_wav(pcmData:bytes, samplerate:int) -> bytes:
         The bytes of the wav file.
     """
 
-    return raw_to_wav(pcmData, samplerate, "PCM_16")
+    return _raw_to_wav(pcmData, samplerate, "PCM_16")
 
 def _open_soundfile(audioData:bytes, audioFormat:str) -> soundfile.SoundFile:
     audioFormat = audioFormat.lower()
@@ -579,6 +559,23 @@ def save_audio_v2(audioData:Union[bytes, numpy.ndarray], saveLocation:Union[Bina
         sf.write(saveLocation, numpy_data, samplerate, format=outputFormat)
         if callable(getattr(saveLocation,"flush")):
             saveLocation.flush()
+
+def _edit_stream_settings(playbackBlockSize=None, downloadChunkSize=None) -> None:
+    """
+    This function lets you override the default values used for the streaming functions.
+
+    Danger:
+        Please only do this if you know what you're doing.
+
+    Parameters:
+        playbackBlockSize (int): The size (in frames) of the blocks used for playback.
+        downloadChunkSize (int): The size (in bytes) of the chunks to be downloaded.
+    """
+    global _playbackBlockSize, _downloadChunkSize
+    if playbackBlockSize is not None:
+        _playbackBlockSize = playbackBlockSize
+    if downloadChunkSize is not None:
+        _downloadChunkSize = downloadChunkSize
 
 
 #This class is used to make async generators into normal iterators for input streaming. I didn't feel like reworking all the code to be async instead of multithreaded.

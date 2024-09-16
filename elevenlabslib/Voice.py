@@ -367,9 +367,9 @@ class Voice:
 
             if "output_format" in params:
                 if "pcm" in params["output_format"]:
-                    audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
+                    audioData = _pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
                 if "ulaw" in params["output_format"]:
-                    audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
+                    audioData = _ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
 
             audio_future.set_result(audioData)
 

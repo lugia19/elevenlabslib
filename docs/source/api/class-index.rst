@@ -4,9 +4,10 @@ Classes documentation
 .. toctree::
     user.rst
     voice.rst
-    model.rst
-    historyitem.rst
-    sample.rst
     project.rst
+    dub.rst
+    historyitem.rst
+    model.rst
+    sample.rst
     pronunciation-dictionary.rst
     :maxdepth: 3

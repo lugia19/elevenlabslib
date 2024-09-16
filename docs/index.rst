@@ -116,6 +116,7 @@ the available settings in these dataclasses.
 
 .. toctree::
     source/api/class-index.rst
+    source/api/utils.rst
     source/api/helpers.rst
     source/examples.md
     :maxdepth: 3
