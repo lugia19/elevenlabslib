@@ -358,10 +358,14 @@ class StitchingOptions:
         previous_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated before this generation. Overrides previous_text.
         next_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated after this generation. Overrides next_text.
     """
-    previous_text:str = ""
-    next_text:str = ""
+    previous_text:Optional[str] = None
+    next_text:Optional[str] = None
     previous_request_ids: Optional[List[Union[int, HistoryItem]]] = None
     next_request_ids:Optional[List[Union[int, HistoryItem]]] = None
+
+    def __post_init__(self):
+        self.previous_request_ids = [(x if isinstance(x, int) else x.requestID) for x in self.previous_request_ids] if self.previous_request_ids else None
+        self.next_request_ids = [(x if isinstance(x, int) else x.requestID) for x in self.next_request_ids] if self.next_request_ids else None
 
 
 def PromptingOptions(pre_prompt: str = "", post_prompt: str = "",
@@ -460,12 +464,6 @@ def play_audio_v2(audioData:Union[bytes, numpy.ndarray], playbackOptions:Playbac
     Returns:
         None
     """
-    # Let's make sure the user didn't just forward a tuple from one of the other functions...
-    if isinstance(audioData, tuple):
-        for item in audioData:
-            if isinstance(item, bytes):
-                audioData = item
-
     if isinstance(audioFormat, GenerationOptions):
         audioFormat = audioFormat.output_format
 
@@ -785,14 +783,6 @@ def _reformat_transcript(alignment_data, current_audio_ms=0) -> (list, int):
             }
         formatted_list.append(new_char)
 
-        # TODO: Remove cutout functionality - we have pre and post text now.
-        #if self._enable_cutout:
-        #    if new_char["character"] == '"':
-        #        if self._start_frame is None:
-        #            self._start_frame = math.ceil((new_char["start_time_ms"] + new_char["duration_ms"] * (1 - self._prompting_options.open_quote_duration_multiplier)) * self.sample_rate / 1000)
-        #        else:
-        #            self._end_frame = math.floor((new_char["start_time_ms"] + new_char["duration_ms"] * self._prompting_options.close_quote_duration_multiplier) * self.sample_rate / 1000)
-
     new_audio_ms = formatted_list[-1]["start_time_ms"] + formatted_list[-1]["duration_ms"]
     return formatted_list, new_audio_ms
 
@@ -817,24 +807,13 @@ def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
 
 class _AudioStreamer:
     def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase]):
         self._events: dict[str, threading.Event] = {
             "downloadDoneEvent": threading.Event()
         }
 
         self._current_audio_ms = 0
         self.transcript_queue = queue.Queue()   #Holds the transcripts for the audio data
-        self._enable_cutout = False
-        self._prompting_options = prompting_options
-
-        self._start_frame = None
-        self._end_frame = None
-
-        if prompting_options is not None:   #Sanity check
-            if isinstance(prompt, Iterator) and not isinstance(prompt, SyncIterator):   #Must be a normal iterator, and not a SyncIterator.
-                self._enable_cutout = True
-                if prompting_options.pre_prompt == "":
-                    self._start_frame = 0
 
         self.connection_future:Future[Union[requests.Response, websockets.sync.client.ClientConnection]] = streamConnection
         self.connection:Optional[Union[requests.Response, websockets.sync.client.ClientConnection]] = None
@@ -845,88 +824,6 @@ class _AudioStreamer:
         self.channels = 1
 
         self._prompt = prompt
-
-    def _check_position(self, curr_frame) -> (bool, int, int):
-        start_delta = None
-        end_delta = None
-        if self._enable_cutout:
-            frame_bool = False
-            if self._start_frame is None:
-                frame_bool = False  # No start time yet
-            else:
-                start_delta = curr_frame - self._start_frame
-                if start_delta >= 0:
-                    frame_bool = True  # After start time
-                if self._end_frame is not None:  # If we have an end time
-                    end_delta = curr_frame - self._end_frame
-                    if end_delta >= 0:
-                        frame_bool = False  # We're past the end time
-        else:
-            frame_bool = True
-
-        check_info = {
-            "start_frame": self._start_frame,
-            "start_delta": start_delta,
-            "end_frame": self._end_frame,
-            "end_delta": end_delta,
-            "curr_frame":curr_frame,
-            "is_usable": frame_bool
-        }
-        logging.debug(check_info)
-
-        return frame_bool, start_delta, end_delta
-
-    def _cutout_data(self, curr_frame:int, data:Union[bytes, numpy.ndarray], framesize:int) -> (Union[bytes, numpy.ndarray], str):
-        """
-        Parameters:
-            curr_frame (int): The position (at the start of data!)
-            data (bytes|numpy.ndarray): The data to handle
-            framesize (int): The framesize.
-        Returns:
-            A tuple with the modified data and an indicator of the action taken (None,start,stop,zero)
-        """
-        if not self._enable_cutout:
-            return data, None
-
-        datalen = 0
-        if isinstance(data, bytes):
-            datalen = len(data) // framesize
-        elif isinstance(data, numpy.ndarray):
-            framesize = 1   #Override it since we're working with frames directly
-            if data.ndim == 1:
-                datalen = len(data)
-            elif data.ndim == 2:
-                datalen = data.shape[0]
-
-        #curr_frame -= datalen       #If we've read this chunk, then we're positioned _after_ it, so account for that.
-
-        frame_bool, start_delta, end_delta = self._check_position(curr_frame)
-
-        if start_delta is not None and start_delta < 0 and datalen > -start_delta:
-            data_to_keep = (datalen + start_delta) * framesize
-            if isinstance(data, bytes):
-                return b'\x00' * (len(data) - data_to_keep) + data[-data_to_keep:], "start"
-            else:  # numpy.ndarray
-                kept_data = data[-data_to_keep:]
-                empty_data = np.zeros_like(data)[:datalen - data_to_keep]
-                return np.concatenate((empty_data, kept_data)), "start"
-
-        elif end_delta is not None and end_delta < 0 and datalen > -end_delta:
-            data_to_keep = (datalen + end_delta) * framesize
-            if isinstance(data, bytes):
-                return data[:data_to_keep] + b'\x00' * (len(data) - data_to_keep), "stop"
-            else:  # numpy.ndarray
-                kept_data = data[:data_to_keep]
-                empty_data = np.zeros_like(data)[:len(data) - data_to_keep]
-                return np.concatenate((kept_data, empty_data)), "stop"
-        elif not frame_bool:
-            if isinstance(data, bytes):
-                data = b'\x00' * len(data)
-            else:
-                data = np.zeros_like(data)
-            return data, "zero"
-
-        return data, None
 
     def _stream_downloader_function(self):
         # This is the function running in the download thread.
@@ -1006,39 +903,10 @@ class _AudioStreamer:
     def _stream_downloader_chunk_handler(self, chunk):
         pass
 
-
-class _DownloadStreamer(_AudioStreamer):
-    #Currently unused - just puts the raw audio bytes in a queue
-    def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
-        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
-        self.destination_queue = queue.Queue()
-        if "mp3" in generation_options.output_format.lower():
-            self._framesize = 4
-        else:
-            self._framesize = 2
-        self._audio_length = 0
-
-    def begin_streaming(self):
-        logging.debug("Starting playback...")
-
-        self.connection = self.connection_future.result()
-        if isinstance(self.connection, requests.Response):
-            self._stream_downloader_function()
-        else:
-            self._stream_downloader_function_websockets()
-        logging.debug("Stream done - putting None in the queue.")
-        self.destination_queue.put(None)
-        return
-
-    def _stream_downloader_chunk_handler(self, chunk):
-        self.destination_queue.put(chunk)
-
-
 class _NumpyMp3Streamer(_AudioStreamer):
     def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
-        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase]):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt)
 
         self._events.update({
             "headerReadyEvent": threading.Event(),
@@ -1174,11 +1042,6 @@ class _NumpyMp3Streamer(_AudioStreamer):
         while True:
             try:
                 data = self._get_data_from_download_thread()
-
-                with self._bytesLock:
-                    original_data_length = len(data)
-                    cur_pos = self._bytesSoundFile.tell() - original_data_length
-                    data, action_taken = self._cutout_data(cur_pos, data, self._frameSize)
             except RuntimeError as e:
                 logging.debug("File was looping at the end. Exiting.")
                 break
@@ -1200,8 +1063,6 @@ class _NumpyMp3Streamer(_AudioStreamer):
                             logging.debug("Still some data left, writing it...")
                             # logging.debug("Putting " + str(len(data)) +
                             #              " bytes in queue.")
-                            curr_frame = curPos - len(data)
-                            data, action = self._cutout_data(curr_frame, data, self._frameSize)
                             self.playback_queue.put(data)
                             self.userfacing_queue.put(data)
                         break
@@ -1246,8 +1107,8 @@ class _NumpyMp3Streamer(_AudioStreamer):
 
 class _NumpyRAWStreamer(_AudioStreamer):
     def __init__(self, streamConnection: Future[Union[requests.Response, websockets.sync.client.ClientConnection]],
-                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase], prompting_options:PromptingOptions):
-        super().__init__(streamConnection, generation_options, websocket_options, prompt, prompting_options)
+                 generation_options:GenerationOptions, websocket_options:WebsocketOptions, prompt: Union[str, Iterator[str], Iterator[dict], bytes, io.IOBase]):
+        super().__init__(streamConnection, generation_options, websocket_options, prompt)
         parts = generation_options.output_format.lower().split("_")
         self._subtype = parts[0]
 
@@ -1285,29 +1146,25 @@ class _NumpyRAWStreamer(_AudioStreamer):
         while len(self._buffer) >= _playbackBlockSize*self._frameSize:
             curr_pos = (self._audio_length-len(self._buffer)) // self._frameSize
             frame_data, self._buffer = self._buffer[:_playbackBlockSize*self._frameSize], self._buffer[_playbackBlockSize*self._frameSize:]
-            frame_data, action_taken = self._cutout_data(curr_pos, frame_data, self._frameSize)
             audioData = numpy.frombuffer(frame_data, dtype=self._dtype)
             audioData = audioData.reshape(-1, self.channels)
             audioData = audioData.astype(np.float32)
             audioData /= np.iinfo(np.int16).max
-            if action_taken is None or action_taken != "zero":
-                self.playback_queue.put(audioData)
-                self.userfacing_queue.put(audioData)
-            if action_taken is not None and action_taken == "stop":
-                self.playback_queue.put(None)
-                self.userfacing_queue.put(None)
+
+            self.playback_queue.put(audioData)
+            self.userfacing_queue.put(audioData)
 
         if self._events["downloadDoneEvent"].is_set() and len(self._buffer) > 0:
             audioData = numpy.frombuffer(self._buffer, dtype=self._dtype)
             curr_pos = (self._audio_length - len(self._buffer)) // self._frameSize
-            audioData, action_taken = self._cutout_data(curr_pos, audioData, self._frameSize)
             audioData = audioData.reshape(-1, self.channels)
             # Normalize to float32
             audioData = audioData.astype(np.float32)
             audioData /= np.iinfo(np.int16).max
-            if action_taken is None or action_taken != "zero":
-                self.playback_queue.put(audioData)
-                self.userfacing_queue.put(audioData)
+
+            self.playback_queue.put(audioData)
+            self.userfacing_queue.put(audioData)
+
             # Pad the end of the audio with silence to avoid the looping final chunk.s
             silence_chunk = np.zeros(_playbackBlockSize * self.channels, dtype=self._dtype).reshape(-1, self.channels)
             silence_chunk = silence_chunk.astype(np.float32)

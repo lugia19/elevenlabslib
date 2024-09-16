@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
-from typing import Iterator
+from typing import Iterator, Dict
 from typing import TYPE_CHECKING
 
 import numpy
@@ -178,55 +178,75 @@ class Voice:
         _api_json("/voices/" + self.voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
         self._settings = payload
 
-    def _generate_payload_and_options(self, prompt:Union[str, bytes, BinaryIO], generationOptions:GenerationOptions=None) -> (dict, GenerationOptions):
+    def _generate_payload_and_options(self, prompt:Union[str, bytes, BinaryIO], generation_options:GenerationOptions=None, stitching_options:StitchingOptions=None) -> (dict, GenerationOptions):
         """
         Generates the payload for the text-to-speech API call.
 
         Args:
             prompt (str|bytes): The prompt or audio to generate speech for.
-            generationOptions (GenerationOptions): The options for this generation.
+            generation_options (GenerationOptions): The options for this generation.
+            stitching_options (StitchingOptions): The stitching options for this generation.
         Returns:
             A tuple of:
             dict: A dictionary representing the payload for the API call.
             GenerationOptions: The generationOptions with the real values (including those taken from the stored settings)
         """
 
-        generationOptions = dataclasses.replace(generationOptions)  #Ensure we have a copy, not the original.
-        generationOptions = self._complete_generation_options(generationOptions)
+        generation_options = dataclasses.replace(generation_options)  #Ensure we have a copy, not the original.
+        generation_options = self._complete_generation_options(generation_options)
 
-        voice_settings = generationOptions.get_voice_settings_dict()
+        voice_settings = generation_options.get_voice_settings_dict()
 
-        model_id = generationOptions.model_id
+        model_id = generation_options.model_id
 
         if isinstance(prompt, str):
             payload = {
                 "model_id": model_id,
                 "text": prompt,
-                "seed": generationOptions.seed,
-                "language_code": generationOptions.language_code
+                "seed": generation_options.seed,
+                "language_code": generation_options.language_code,
+                "previous_text": stitching_options.previous_text,
+                "next_text": stitching_options.next_text
             }
+
+            if stitching_options:
+                payload["previous_text"] = stitching_options.previous_text
+                payload["next_text"] = stitching_options.next_text
+                if stitching_options.previous_request_ids:
+                    payload["previous_request_ids"] = stitching_options.previous_request_ids
+
+                if stitching_options.next_request_ids:
+                    payload["next_request_ids"] = stitching_options.next_request_ids
+
         else:
             if "sts" not in model_id:
                 model_id = default_sts_model
             payload = {"model_id": model_id}
 
-        if generationOptions.pronunciation_dictionaries:
-            payload["pronunciation_dictionary_locators"] = []
-            for dictionary in generationOptions.pronunciation_dictionaries:
+        if generation_options.pronunciation_dictionaries:
+            payload["pronunciation_dictionary_locators"]:List[Dict[str, int]] = list()
+            for dictionary in generation_options.pronunciation_dictionaries:
                 payload["pronunciation_dictionary_locators"].append({
                     "pronunciation_dictionary_id": dictionary.pronunciation_dictionary_id,
                     "version_id": dictionary.version_id
                 })
 
+
+
         if isinstance(prompt, str):
             payload["voice_settings"] = voice_settings
         else:
             payload["voice_settings"] = json.dumps(voice_settings)
+
+        #Clean up empty values
+        keys_to_pop = []
         for key, value in payload.items():
             if value is None:
-                payload.pop(key)
+                keys_to_pop.append(key)
+        for key in keys_to_pop:
+            payload.pop(key)
 
-        return payload, generationOptions
+        return payload, generation_options
 
     def _complete_generation_options(self, generationOptions:GenerationOptions) -> GenerationOptions:
         generationOptions = self._linkedUser.get_real_audio_format(generationOptions)
@@ -286,31 +306,8 @@ class Voice:
 
         return websocket
 
-    def _generate_audio_prompting(self, prompt:str, generation_options:GenerationOptions, promptingOptions:PromptingOptions):
-        """
-        Internal use only, just wraps stream_audio_no_playback.
-        """
-        audio_queue, transcript_queue, _, _ = self.stream_audio_v3(prompt, generation_options, promptingOptions=promptingOptions, disable_playback=True)
-
-        audio_chunk: numpy.ndarray = audio_queue.get()
-        shape_of_chunk = audio_chunk.shape
-        empty_shape = (0,) + shape_of_chunk[1:]
-        all_audio = np.empty(empty_shape, dtype=audio_chunk.dtype)
-        while audio_chunk is not None:
-            all_audio = np.concatenate((all_audio, audio_chunk), axis=0)
-            audio_chunk = audio_queue.get()
-        final_audio = io.BytesIO()
-
-        audio_extension = ""
-        if "mp3" in generation_options.output_format: audio_extension = "mp3"
-        if "pcm" in generation_options.output_format: audio_extension = "wav"
-        if "ulaw" in generation_options.output_format: audio_extension = "wav"
-        save_audio_v2(all_audio, final_audio, audio_extension, generation_options)
-        final_audio.seek(0)
-        audioData = final_audio.read()
-        return audioData
-
-    def generate_audio_v3(self, prompt: Union[str,bytes, BinaryIO], generation_options:GenerationOptions=GenerationOptions(), prompting_options:PromptingOptions=None) -> \
+    def generate_audio_v3(self, prompt: Union[str,bytes, BinaryIO], generation_options:GenerationOptions=GenerationOptions(),
+                          prompting_options:PromptingOptions=None, stitching_options:StitchingOptions=StitchingOptions()) -> \
             tuple[Future[bytes], Optional[Future[GenerationInfo]]]:
         """
         Generates speech for the given prompt or audio and returns the audio data as bytes of a file alongside the new historyID.
@@ -321,7 +318,7 @@ class Voice:
         Args:
             prompt (str|bytes|BinaryIO): The text prompt or audio bytes/file pointer to generate speech for.
             generation_options (GenerationOptions): Options for the audio generation such as the model to use and the voice settings.
-            prompting_options (PromptingOptions): Options for pre/post prompting the audio, for improved emotion. Ignored for speech to speech.
+            stitching_options (StitchingOptions, optional): Options for request stitching and pre/post text.
         Returns:
             tuple[Future[bytes], Optional[GenerationInfo]]:
                 - A future that will contain the bytes of the audio file once the generation is complete.
@@ -332,7 +329,12 @@ class Voice:
         """
         generation_options = self.linkedUser.get_real_audio_format(generation_options)
 
-        payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
+        if prompting_options:
+            warn("The prompting_options parameter is outdated and will be removed. Use stitching_options instead.", DeprecationWarning)
+            stitching_options = prompting_options
+
+
+        payload, generation_options = self._generate_payload_and_options(prompt, generation_options, stitching_options)
         params = self._generate_parameters(generation_options)
         if isinstance(prompt, str):
             generationID = f"{self.voiceID} - {prompt} - {time.time()}"
@@ -350,62 +352,43 @@ class Voice:
         audio_future = concurrent.futures.Future()
         info_future = concurrent.futures.Future()
 
-        if isinstance(prompt,str) and prompting_options is not None:
-            def wrapped():
-                audioData = self._generate_audio_prompting(prompt, generation_options, prompting_options)
-                audio_future.set_result(audioData)
-            threading.Thread(target=wrapped).start()
-            return audio_future, None
-        else:
-            def wrapped():
-                responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
-                response_headers = responseConnection.headers
-                responseData = responseConnection.content
-                response_dict  = json.loads(responseData.decode("utf-8"))
-                audioData = base64.b64decode(response_dict["audio_base64"])
+        def wrapped():
+            responseConnection = _api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue)
+            response_headers = responseConnection.headers
+            responseData = responseConnection.content
+            response_dict  = json.loads(responseData.decode("utf-8"))
+            audioData = base64.b64decode(response_dict["audio_base64"])
 
-                info_future.set_result(GenerationInfo(history_item_id=response_headers.get("history-item-id"),
-                                                request_id=response_headers.get("request-id"),
-                                                tts_latency_ms=response_headers.get("tts-latency-ms"),
-                                                transcript=_reformat_transcript(response_dict['alignment']),
-                                                character_cost=int(response_headers.get("character-cost", "-1"))))
+            info_future.set_result(GenerationInfo(history_item_id=response_headers.get("history-item-id"),
+                                            request_id=response_headers.get("request-id"),
+                                            tts_latency_ms=response_headers.get("tts-latency-ms"),
+                                            transcript=_reformat_transcript(response_dict['alignment']),
+                                            character_cost=int(response_headers.get("character-cost", "-1"))))
 
-                if "output_format" in params:
-                    if "pcm" in params["output_format"]:
-                        audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
-                    if "ulaw" in params["output_format"]:
-                        audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
+            if "output_format" in params:
+                if "pcm" in params["output_format"]:
+                    audioData = pcm_to_wav(audioData, int(params["output_format"].lower().replace("pcm_", "")))
+                if "ulaw" in params["output_format"]:
+                    audioData = ulaw_to_wav(audioData, int(params["output_format"].lower().replace("ulaw_", "")))
 
-                audio_future.set_result(audioData)
+            audio_future.set_result(audioData)
 
-            threading.Thread(target=wrapped).start()
+        threading.Thread(target=wrapped).start()
 
-            return audio_future, info_future
+        return audio_future, info_future
 
     def _setup_streamer(self, prompt:Union[str, Iterator[str], Iterator[dict], bytes, BinaryIO],
                         generation_options:GenerationOptions=GenerationOptions(), websocket_options:WebsocketOptions=WebsocketOptions(),
-                        prompting_options:PromptingOptions=None) -> Union[_NumpyMp3Streamer, _NumpyRAWStreamer]:
+                        stitching_options:StitchingOptions=StitchingOptions()) -> Union[_NumpyMp3Streamer, _NumpyRAWStreamer]:
         """
         Internal use only - sets up and returns a _NumpyStreamer of the correct type, which will stream the audio data.
         """
         # We need the real sample rate.
         generation_options = self._complete_generation_options(generation_options)
 
-        #prompting_options section (turn prompt into iterator)
-        if isinstance(prompt, str) and prompting_options is not None:
-            original_prompt = prompt
-
-            def write():
-                for _ in range(1):
-                    yield f'{prompting_options.pre_prompt} "{original_prompt}" {prompting_options.post_prompt}'
-
-            prompt = write()
-            websocket_options = WebsocketOptions(try_trigger_generation=False, chunk_length_schedule=[500])
-        else:
-            prompting_options = None  # Ignore them if not generating a normal string.
         response_connection_future = concurrent.futures.Future()
-        if isinstance(prompt, str): #Checking prompting_options is None is pointless, since if it's not None prompt will be an iterator anyway.
-            payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
+        if isinstance(prompt, str):
+            payload, generation_options = self._generate_payload_and_options(prompt, generation_options, stitching_options)
             path = "/text-to-speech/" + self.voiceID + "/stream/with-timestamps"
             # Not using input streaming
             params = self._generate_parameters(generation_options)
@@ -417,7 +400,7 @@ class Voice:
             threading.Thread(target=wrapper).start()
 
         elif isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
-            payload, generation_options = self._generate_payload_and_options(prompt, generation_options)
+            payload, generation_options = self._generate_payload_and_options(prompt, generation_options, stitching_options)
             path = "/speech-to-speech/" + self.voiceID + "/stream"
             # Using speech to speech
             params = self._generate_parameters(generation_options)
@@ -434,7 +417,7 @@ class Voice:
                 response_connection_future.set_result(_api_tts_with_concurrency(requestFunction, generationID, self._linkedUser.generation_queue))
             threading.Thread(target=wrapper).start()
 
-        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt) or prompting_options is not None:
+        elif isinstance(prompt, Iterator) or inspect.isasyncgen(prompt):
             if inspect.isasyncgen(prompt):
                 prompt = SyncIterator(prompt)
 
@@ -447,9 +430,9 @@ class Voice:
         streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
 
         if "mp3" in generation_options.output_format or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
-            streamer = _NumpyMp3Streamer(response_connection_future, generation_options, websocket_options, prompt, prompting_options)
+            streamer = _NumpyMp3Streamer(response_connection_future, generation_options, websocket_options, prompt)
         else:
-            streamer = _NumpyRAWStreamer(response_connection_future, generation_options, websocket_options, prompt, prompting_options)
+            streamer = _NumpyRAWStreamer(response_connection_future, generation_options, websocket_options, prompt)
 
         return streamer
 
@@ -459,6 +442,7 @@ class Voice:
                         generation_options:GenerationOptions=GenerationOptions(),
                         websocket_options:WebsocketOptions=WebsocketOptions(),
                         prompting_options:PromptingOptions=None,
+                        stitching_options:StitchingOptions=StitchingOptions(),
                         disable_playback:bool = False
                         ) -> tuple[queue.Queue[numpy.ndarray], Optional[queue.Queue[str]], Optional[Future[sounddevice.OutputStream]], Optional[Future[GenerationInfo]]]:
         """
@@ -469,7 +453,7 @@ class Voice:
             playback_options (PlaybackOptions, optional): Options for the audio playback such as the device to use and whether to run in the background.
             generation_options (GenerationOptions, optional): Options for the audio generation such as the model to use and the voice settings.
             websocket_options (WebsocketOptions, optional): Options for the websocket streaming. Ignored if not passed when not using websockets.
-            prompting_options (PromptingOptions, optional): Options for pre/post prompting the audio, for improved emotion. Ignored for input streaming and STS.
+            stitching_options (StitchingOptions, optional): Options for request stitching and pre/post prompting the audio.
             disable_playback (bool, optional): Allows you to disable playback altogether.
         Returns:
             tuple[queue.Queue[numpy.ndarray], Optional[queue.Queue[str]], Optional[Future[OutputStream]], Optional[GenerationInfo]]:
@@ -481,7 +465,11 @@ class Voice:
 
         generation_options = self._complete_generation_options(generation_options)
 
-        streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer] = self._setup_streamer(prompt, generation_options, websocket_options, prompting_options)
+        if prompting_options:
+            warn("The prompting_options parameter is outdated and will be removed. Use stitching_options instead.", DeprecationWarning)
+            stitching_options = prompting_options
+
+        streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer] = self._setup_streamer(prompt, generation_options, websocket_options, stitching_options)
         audio_stream_future, transcript_queue, generation_info_future = None, None, None
 
         if disable_playback:
@@ -499,7 +487,7 @@ class Voice:
             else:
                 player.begin_playback(audio_stream_future)
 
-        if (isinstance(prompt, str) and prompting_options is None) or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
+        if isinstance(prompt, str) or isinstance(prompt, io.IOBase) or isinstance(prompt, bytes):
             generation_info_future = concurrent.futures.Future()
             def wrapper():
                 connection_headers = streamer.connection_future.result().headers
@@ -514,67 +502,6 @@ class Voice:
             transcript_queue = streamer.transcript_queue
 
         return streamer.userfacing_queue, transcript_queue, audio_stream_future, generation_info_future
-
-
-
-    #region Deprecated v2 functions
-    def generate_play_audio_v2(self, prompt:Union[str,bytes, BinaryIO], playbackOptions:PlaybackOptions=PlaybackOptions(), generationOptions:GenerationOptions=GenerationOptions(), promptingOptions:PromptingOptions=None) -> tuple[bytes,str, sd.OutputStream]:
-        warn("This function is deprecated. Just use generate_audio_v3 combined with play_audio_v2.", DeprecationWarning)
-
-        generationOptions = self._complete_generation_options(generationOptions)
-
-        audioData, historyID = self.generate_audio_v2(prompt, generationOptions, promptingOptions)
-        outputStream = play_audio_v2(audioData, playbackOptions, self._linkedUser.get_real_audio_format(generationOptions).output_format)
-
-        return audioData, historyID, outputStream
-
-    def generate_to_historyID_v2(self, prompt: Union[str, bytes, BinaryIO], generationOptions: GenerationOptions = None) -> str:
-        warn("This function is deprecated. Use generate_audio_v3 instead.", DeprecationWarning)
-        audio_data_future, generation_info = self.generate_audio_v3(prompt, generationOptions)
-
-        if generation_info:
-            return generation_info.history_item_id
-        else:
-            return "no_history_id_available"
-
-    def generate_audio_v2(self, prompt: Union[str, bytes, BinaryIO], generationOptions: GenerationOptions = GenerationOptions(), promptingOptions: PromptingOptions = None) -> tuple[bytes, str]:
-        warn("Deprecated. Use generate_audio_v3 instead.", DeprecationWarning)
-        future, gen_info = self.generate_audio_v3(prompt, generationOptions, promptingOptions)
-        if gen_info:
-            if isinstance(gen_info, GenerationInfo):
-                history_id = gen_info.history_item_id
-            else:
-                gen_info = gen_info.result()
-                history_id = gen_info.history_item_id
-        else:
-            history_id = "no_history_id_available"
-
-        return future.result(), history_id
-
-    def generate_stream_audio_v2(self, prompt:Union[str, Iterator[str], Iterator[dict], AsyncIterator, bytes, BinaryIO],
-                                 playbackOptions:PlaybackOptions=PlaybackOptions(),
-                                 generationOptions:GenerationOptions=GenerationOptions(),
-                                 websocketOptions:WebsocketOptions=WebsocketOptions(),
-                                 promptingOptions:PromptingOptions=None) -> tuple[str, Future[Any], Optional[queue.Queue]]:
-        warn("This function is deprecated, please use stream_audio_v3 instead.", DeprecationWarning)
-
-        audio_queue, transcript_queue, audio_future, gen_info = self.stream_audio_v3(prompt, playbackOptions, generationOptions, websocketOptions, promptingOptions, disable_playback=False)
-        history_id = "no_history_id_available"
-        if gen_info:
-            history_id = gen_info.history_item_id
-
-        return history_id, audio_future, transcript_queue
-
-
-    def stream_audio_no_playback(self, prompt:Union[str, Iterator[str], Iterator[dict], bytes, BinaryIO],
-                                 generationOptions:GenerationOptions=GenerationOptions(), websocketOptions:WebsocketOptions=WebsocketOptions(),
-                                 promptingOptions:PromptingOptions=None) -> (queue.Queue[numpy.ndarray], Optional[queue.Queue[str]]):
-        warn("This function is deprecated, please use stream_audio_v3 with disable_playback set to True instead.", DeprecationWarning)
-        audio_queue, transcript_queue, _, _ = self.stream_audio_v3(prompt, PlaybackOptions(), generationOptions, websocketOptions, promptingOptions, disable_playback=True)
-        return audio_queue, transcript_queue
-
-    #endregion
-
 
     def get_preview_url(self) -> str|None:
         """

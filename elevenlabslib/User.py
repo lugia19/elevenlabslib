@@ -866,7 +866,7 @@ class User:
             response_connection_future.set_result(_api_multipart(path, headers=self.headers, data={}, stream=True, filesData=files))
 
         threading.Thread(target=wrapper).start()
-        streamer = _NumpyMp3Streamer(response_connection_future, dummy_gen_options, None, audio, None)
+        streamer = _NumpyMp3Streamer(response_connection_future, dummy_gen_options, WebsocketOptions(), audio)
 
         audio_stream_future = None
 

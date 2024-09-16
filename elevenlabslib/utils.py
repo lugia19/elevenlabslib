@@ -15,7 +15,7 @@ import queue
 import threading
 import time
 import zlib
-from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple, TYPE_CHECKING, TextIO
+from typing import Optional, BinaryIO, Callable, Union, Any, Iterator, List, AsyncIterator, Tuple, TYPE_CHECKING, TextIO, Dict
 from warnings import warn
 import json
 import numpy
@@ -38,13 +38,101 @@ from elevenlabslib.helpers import SyncIterator, _NumpyRAWStreamer, _NumpyMp3Stre
 _playbackBlockSize = 2048
 _downloadChunkSize = 4096
 
-if TYPE_CHECKING:
-    from elevenlabslib.Voice import Voice
-    from elevenlabslib.HistoryItem import HistoryItem
-    from elevenlabslib.PronunciationDictionary import PronunciationDictionary
-    from elevenlabslib.Model import Model
-    from elevenlabslib import *
+
+from elevenlabslib.Voice import Voice
+from elevenlabslib.HistoryItem import HistoryItem
+from elevenlabslib.PronunciationDictionary import PronunciationDictionary
+from elevenlabslib.Model import Model
+from elevenlabslib import *
 from elevenlabslib._audio_cutter_helper import split_audio
+
+def generate_dialog_with_stitching(voice:Voice, prompts:List[str|Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None):
+    """
+    This function generates and plays back a series of audios using request stitching.
+
+    Arguments:
+        - voice (Voice): The voice to use
+        - prompts (List[str|Dict[str,str]]): The list of texts to be generated, containing either strings or dicts which have both a 'prompt' and a 'next_text', so it can be manually overwritten.
+        - generation_options (GenerationOptions, optional): The GenerationOptions to use.
+        - first_prompt_pretext (str, optional): The previous_text to use for the first generation.
+    """
+    previous_generations = []
+    prompts_length = len(prompts)
+    for idx, prompt in enumerate(prompts):
+        stitching_options = StitchingOptions()
+        if idx < prompts_length-1:
+            stitching_options.next_text = prompts[idx+1]
+
+        if isinstance(prompt, dict):
+            stitching_options.next_text = prompt["next_text"]
+            prompt = prompt["prompt"]
+
+
+        if idx > 0:
+            stitching_options.previous_request_ids = previous_generations[-3:]
+        elif first_prompt_pretext:
+            stitching_options.previous_text = first_prompt_pretext
+
+        _,_,_, generation_info_future = voice.stream_audio_v3(prompt, generation_options=generation_options, stitching_options=stitching_options)
+        generation_info = generation_info_future.result()
+        previous_generations.append(generation_info.request_id)
+
+    return
+
+
+#Audio cutting/ONNX stuff.
+def sts_long_audio(source_audio:Union[bytes, BinaryIO], voice:Voice, generation_options:GenerationOptions = GenerationOptions(model="eleven_multilingual_sts_v2"), speech_threshold:float=0.5) -> bytes:
+    """
+    Allows you to process a long audio file with speech to speech automatically, using Silero-VAD to split it up naturally.
+
+    Arguments:
+        source_audio (bytes|BinaryIO): The source audio.
+        voice (Voice): The voice to use for STS.
+        generation_options (GenerationOptions): The generation options to use. The model specified must support STS.
+        speech_threshold (float): The likelyhood that a segment must be speech for it to be recognized (0.5/50% works for most audio files).
+    Returns:
+        bytes: The bytes of the final audio, all concatenated, in mp3 format.
+    """
+    if isinstance(source_audio, io.IOBase):
+        source_audio.seek(0)
+        source_audio = source_audio.read()
+
+    #Only mp3 works. So we default to mp3 highest.
+    if "mp3" not in generation_options.output_format:
+        generation_options = dataclasses.replace(generation_options, output_format="mp3_highest")
+        generation_options = voice.linkedUser.get_real_audio_format(generation_options)
+
+    audio_segments = split_audio(source_audio, speech_threshold=speech_threshold)
+
+    destination_io = io.BytesIO()
+    tts_segments:List[bytes] = []
+    tts_futures:List[concurrent.futures.Future] = []
+
+    #Queue them all up for generation
+    for idx, audio_io in enumerate(audio_segments):
+        audio_io.seek(0)
+        tts_future, _ = voice.generate_audio_v3(audio_io, generation_options=generation_options)
+        tts_futures.append(tts_future)
+
+    #Get the results
+    for idx, tts_future in enumerate(tts_futures):
+        tts_segment = tts_future.result()
+        data, samplerate = sf.read(io.BytesIO(tts_segment), dtype="float32")
+        tts_segments.append(data)
+
+    concatenated_samples = np.concatenate(tts_segments)
+
+    #Technically, the section below is useless. I'm keeping it just in case they add support for other formats for STS.
+    audio_extension = ""
+    if "mp3" in generation_options.output_format: audio_extension = "mp3"
+    if "pcm" in generation_options.output_format: audio_extension = "wav"
+    if "ulaw" in generation_options.output_format: audio_extension = "wav"
+
+    save_audio_v2(concatenated_samples, destination_io, audio_extension, generation_options)
+    destination_io.seek(0)
+
+    return destination_io.read()
+
 
 class Synthesizer:
     """
@@ -53,14 +141,12 @@ class Synthesizer:
     They will all be downloaded together, and will play back in the same order you put them in. I've found this gives the lowest possible latency.
     """
     def __init__(self, defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
-                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
-                 defaultPromptingOptions:PromptingOptions=None):
+                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3)):
         """
         Initializes the Synthesizer instance.
         Parameters:
             defaultPlaybackOptions (PlaybackOptions, optional): The default playback options (for the onPlayback callbacks), that will be used if none are specified when calling add_to_queue
             defaultGenerationOptions (GenerationOptions, optional): The default generation options, that will be used if none are specified when calling add_to_queue
-            defaultGenerationOptions (PromptingOptions, optional): The default prompting options, that will be used if none are specified when calling add_to_queue
         """
 
         self._eventStreamQueue = queue.Queue()
@@ -70,7 +156,6 @@ class Synthesizer:
         self._interruptEvent = threading.Event()
         self._currentStream: sd.OutputStream = None
         self._defaultGenOptions = defaultGenerationOptions
-        self._defaultPromptOptions = defaultPromptingOptions
         if isinstance(defaultPlaybackOptions, int):
             logging.warning("Synthesizer no longer takes portAudioDeviceID as a parameter, please use defaultPlaybackOptions from now on. Wrapping it...")
             defaultPlaybackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=defaultPlaybackOptions)
@@ -107,7 +192,7 @@ class Synthesizer:
         warn("This is deprecated, use change_default_settings to change it through the defaultPlaybackOptions instead.", DeprecationWarning)
         self._defaultPlayOptions.portaudioDeviceID = portAudioDeviceID
 
-    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, defaultPromptingOptions:PromptingOptions=None):
+    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None):
         """
         Allows you to change the default settings.
         """
@@ -115,10 +200,8 @@ class Synthesizer:
             self._defaultGenOptions = defaultGenerationOptions
         if defaultPlaybackOptions is not None:
             self._defaultPlayOptions = defaultPlaybackOptions
-        if defaultPromptingOptions is not None:
-            self._defaultPromptOptions = defaultPromptingOptions
 
-    def add_to_queue(self, voice:Voice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None, promptingOptions:PromptingOptions=None) -> None:
+    def add_to_queue(self, voice:Voice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None) -> None:
         """
         Adds an item to the synthesizer queue.
         Parameters:
@@ -126,21 +209,18 @@ class Synthesizer:
             prompt (str): The prompt to be spoken
             generationOptions (GenerationOptions, optional): Overrides the generation options for this generation
             playbackOptions (PlaybackOptions, optional): Overrides the playback options for this generation
-            promptingOptions (PromptingOptions): Overrides the prompting options for this generation
         """
         if generationOptions is None:
             generationOptions = self._defaultGenOptions
         if playbackOptions is None:
             playbackOptions = self._defaultPlayOptions
-        if promptingOptions is None:
-            promptingOptions = self._defaultPromptOptions
-        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions, promptingOptions))
+        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions))
 
     def _consumer_thread(self):
         voice, prompt, genOptions, playOptions = None, None, None, None
         while not self._interruptEvent.is_set():
             try:
-                voice, prompt, genOptions, playOptions, promptOptions = self._ttsQueue.get(timeout=10)
+                voice, prompt, genOptions, playOptions = self._ttsQueue.get(timeout=10)
                 playOptions = dataclasses.replace(playOptions, runInBackground=True) #Ensure this is set to true, always.
             except queue.Empty:
                 continue
@@ -150,9 +230,9 @@ class Synthesizer:
                     return
 
             logging.debug(f"Synthesizing prompt: {prompt}")
-            self._generate_events_and_begin(voice, prompt, genOptions, playOptions, promptOptions)
+            self._generate_events_and_begin(voice, prompt, genOptions, playOptions)
 
-    def _generate_events_and_begin(self, voice:Voice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions, promptingOptions:PromptingOptions):
+    def _generate_events_and_begin(self, voice:Voice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions):
         newEvent = threading.Event()
 
         def startcallbackfunc():
@@ -166,7 +246,7 @@ class Synthesizer:
 
         wrapped_playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=playbackOptions.portaudioDeviceID, onPlaybackStart=startcallbackfunc, onPlaybackEnd=endcallbackfunc)
 
-        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=wrapped_playbackOptions, promptingOptions=promptingOptions)
+        _, _, streamFuture, _ = voice.stream_audio_v3(prompt=prompt, generation_options=generationOptions, playback_options=wrapped_playbackOptions)
         self._eventStreamQueue.put((newEvent, streamFuture))
 
     def _ordering_thread(self):
@@ -333,9 +413,9 @@ class ReusableInputStreamer:
             temp_future = concurrent.futures.Future()
             temp_future.set_result(current_socket)
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt)
             else:
-                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt)
 
             transcript_future.set_result(streamer.transcript_queue)
 
@@ -469,65 +549,11 @@ class ReusableInputStreamerNoPlayback:
             temp_future = concurrent.futures.Future()
             temp_future.set_result(current_socket)
             if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt)
             else:
-                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
+                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt)
 
             audio_queue_future.set_result(streamer.playback_queue)
             transcript_queue_future.set_result(streamer.transcript_queue)
             streamer.begin_streaming()
             current_socket.close_socket()
-
-
-#Audio cutting/ONNX stuff.
-def sts_long_audio(source_audio:Union[bytes, BinaryIO], voice:Voice, generation_options:GenerationOptions = GenerationOptions(model="eleven_multilingual_sts_v2"), speech_threshold:float=0.5) -> bytes:
-    """
-    Allows you to process a long audio file with speech to speech automatically, using Silero-VAD to split it up naturally.
-
-    Arguments:
-        source_audio (bytes|BinaryIO): The source audio.
-        voice (Voice): The voice to use for STS.
-        generation_options (GenerationOptions): The generation options to use. The model specified must support STS.
-        speech_threshold (float): The likelyhood that a segment must be speech for it to be recognized (0.5/50% works for most audio files).
-    Returns:
-        bytes: The bytes of the final audio, all concatenated, in mp3 format.
-    """
-    if isinstance(source_audio, io.IOBase):
-        source_audio.seek(0)
-        source_audio = source_audio.read()
-
-    #Only mp3 works. So we default to mp3 highest.
-    if "mp3" not in generation_options.output_format:
-        generation_options = dataclasses.replace(generation_options, output_format="mp3_highest")
-        generation_options = voice.linkedUser.get_real_audio_format(generation_options)
-
-    audio_segments = split_audio(source_audio, speech_threshold=speech_threshold)
-
-    destination_io = io.BytesIO()
-    tts_segments:List[bytes] = []
-    tts_futures:List[concurrent.futures.Future] = []
-
-    #Queue them all up for generation
-    for idx, audio_io in enumerate(audio_segments):
-        audio_io.seek(0)
-        tts_future, _ = voice.generate_audio_v3(audio_io, generation_options=generation_options)
-        tts_futures.append(tts_future)
-
-    #Get the results
-    for idx, tts_future in enumerate(tts_futures):
-        tts_segment = tts_future.result()
-        data, samplerate = sf.read(io.BytesIO(tts_segment), dtype="float32")
-        tts_segments.append(data)
-
-    concatenated_samples = np.concatenate(tts_segments)
-
-    #Technically, the section below is useless. I'm keeping it just in case they add support for other formats for STS.
-    audio_extension = ""
-    if "mp3" in generation_options.output_format: audio_extension = "mp3"
-    if "pcm" in generation_options.output_format: audio_extension = "wav"
-    if "ulaw" in generation_options.output_format: audio_extension = "wav"
-
-    save_audio_v2(concatenated_samples, destination_io, audio_extension, generation_options)
-    destination_io.seek(0)
-
-    return destination_io.read()
