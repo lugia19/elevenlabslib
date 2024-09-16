@@ -46,7 +46,7 @@ from elevenlabslib.Model import Model
 from elevenlabslib import *
 from elevenlabslib._audio_cutter_helper import split_audio
 
-def generate_dialog_with_stitching(voice:Voice, prompts:List[str|Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None):
+def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None):
     """
     This function generates and plays back a series of audios using request stitching.
 

@@ -27,16 +27,18 @@ historyItem.delete()
 ```
 
 ## Use audio stitching
+
 ```python
 from elevenlabslib import *
-from elevenlabslib.utils import generate_dialog_with_stitching
+from elevenlabslib.utils import play_dialog_with_stitching
 
 user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-dialog_lines = [{"prompt":"This is the first line!", "next_text":"she shouted angrily."},   #Optionally allows you to override next_text for each line.
+dialog_lines = [{"prompt": "This is the first line!", "next_text": "she shouted angrily."},
+                # Optionally allows you to override next_text for each line.
                 "And here is the second one!"]
-generate_dialog_with_stitching(voice, dialog_lines)
+play_dialog_with_stitching(voice, dialog_lines)
 ```
 
 ## Speech to speech on a long file (eg, an audiobook)
