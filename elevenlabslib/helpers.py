@@ -37,10 +37,9 @@ _playbackBlockSize = 2048
 _downloadChunkSize = 4096
 
 if TYPE_CHECKING:
-    from elevenlabslib import Voice, HistoryItem, PronunciationDictionary
+    from elevenlabslib.HistoryItem import HistoryItem
+    from elevenlabslib.PronunciationDictionary import PronunciationDictionary
     from elevenlabslib.Model import Model
-from elevenlabslib._audio_cutter_helper import split_audio
-
 
 api_endpoint = "https://api.elevenlabs.io/v1"
 default_headers = {'accept': '*/*'}
@@ -57,19 +56,18 @@ apiEndpoint = api_endpoint
 
 default_sts_model = "eleven_multilingual_sts_v2"
 
-category_shorthands = {
-    "generated": "gen",
-    "professional": "pvc",
-    "cloned": "ivc",
-    "premade": "pre",
-}
-model_shorthands = {
-    "eleven_multilingual_v2":"m2",
-    "eleven_english_v2": "e2",
-    "eleven_multilingual_v1": "m1",
-    "eleven_monolingual_v1": "e1",
-    "eleven_turbo_v2": "t2"
-}
+class CategoryShorthands(Enum):
+    generated = "gen"
+    professional = "pvc"
+    cloned = "ivc"
+    premade = "pre"
+
+class ModelShorthands(Enum):
+    eleven_multilingual_v2 = "m2"
+    eleven_english_v2 = "e2"
+    eleven_multilingual_v1 = "e1"
+    eleven_turbo_v2 = "t2"
+    eleven_turbo_v2_5 = ""
 
 class LibCategory(Enum):
     PROFESSIONAL = "professional"
@@ -78,7 +76,6 @@ class LibCategory(Enum):
 
     def _missing_(self, value=None):
         return LibCategory.NONE
-
 
 class LibGender(Enum):
     MALE = "male"
@@ -395,7 +392,7 @@ class GenerationInfo:
     character_cost: Optional[int] = None
 
 @dataclasses.dataclass
-class SFXGenerationOptions:
+class SFXOptions:
     """
     This contains the parameters for a sound effect generation.
     """
@@ -406,438 +403,6 @@ class SFXGenerationOptions:
             raise ValueError("Please input a valid duration (between 0.5 and 22).")
         if self.prompt_influence and not (0 <= self.prompt_influence <= 1):
             raise ValueError("Please input a valid prompt influence (between 0 and 1).")
-
-class Synthesizer:
-    """
-    This is a helper class, which allows you to queue up multiple audio generations.
-
-    They will all be downloaded together, and will play back in the same order you put them in. I've found this gives the lowest possible latency.
-    """
-    def __init__(self, defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
-                 defaultGenerationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
-                 defaultPromptingOptions:PromptingOptions=None):
-        """
-        Initializes the Synthesizer instance.
-        Parameters:
-            defaultPlaybackOptions (PlaybackOptions, optional): The default playback options (for the onPlayback callbacks), that will be used if none are specified when calling add_to_queue
-            defaultGenerationOptions (GenerationOptions, optional): The default generation options, that will be used if none are specified when calling add_to_queue
-            defaultGenerationOptions (PromptingOptions, optional): The default prompting options, that will be used if none are specified when calling add_to_queue
-        """
-
-        self._eventStreamQueue = queue.Queue()
-        self._readyForPlaybackEvent = threading.Event()
-        self._readyForPlaybackEvent.set()
-        self._ttsQueue = queue.Queue()
-        self._interruptEvent = threading.Event()
-        self._currentStream: sd.OutputStream = None
-        self._defaultGenOptions = defaultGenerationOptions
-        self._defaultPromptOptions = defaultPromptingOptions
-        if isinstance(defaultPlaybackOptions, int):
-            logging.warning("Synthesizer no longer takes portAudioDeviceID as a parameter, please use defaultPlaybackOptions from now on. Wrapping it...")
-            defaultPlaybackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=defaultPlaybackOptions)
-        self._defaultPlayOptions = defaultPlaybackOptions
-
-    def start(self):
-        """
-        Begins processing the queued audio.
-        """
-        if self._interruptEvent.is_set():
-            raise ValueError("Please do not re-use a stopped Synthesizer instance. Create a new one instead.")
-
-        threading.Thread(target=self._ordering_thread).start() # Starts the thread that handles playback ordering.
-        threading.Thread(target=self._consumer_thread).start() # Starts the consumer thread
-
-    def stop(self):
-        """
-        Stops playing back audio once the current one is finished.
-        """
-        self._interruptEvent.set()
-
-    def abort(self):
-        """
-        Stops playing back audio immediately.
-        """
-        self.stop()
-        if self._currentStream is not None:
-            self._currentStream.stop()
-
-    def change_output_device(self, portAudioDeviceID:int):
-        """
-        Allows you to change the current output device.
-        """
-        warn("This is deprecated, use change_default_settings to change it through the defaultPlaybackOptions instead.", DeprecationWarning)
-        self._defaultPlayOptions.portaudioDeviceID = portAudioDeviceID
-
-    def change_default_settings(self, defaultGenerationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, defaultPromptingOptions:PromptingOptions=None):
-        """
-        Allows you to change the default settings.
-        """
-        if defaultGenerationOptions is not None:
-            self._defaultGenOptions = defaultGenerationOptions
-        if defaultPlaybackOptions is not None:
-            self._defaultPlayOptions = defaultPlaybackOptions
-        if defaultPromptingOptions is not None:
-            self._defaultPromptOptions = defaultPromptingOptions
-
-    def add_to_queue(self, voice:Voice, prompt:str, generationOptions:GenerationOptions=None, playbackOptions:PlaybackOptions = None, promptingOptions:PromptingOptions=None) -> None:
-        """
-        Adds an item to the synthesizer queue.
-        Parameters:
-            voice (Voice): The voice that will speak the prompt
-            prompt (str): The prompt to be spoken
-            generationOptions (GenerationOptions, optional): Overrides the generation options for this generation
-            playbackOptions (PlaybackOptions, optional): Overrides the playback options for this generation
-            promptingOptions (PromptingOptions): Overrides the prompting options for this generation
-        """
-        if generationOptions is None:
-            generationOptions = self._defaultGenOptions
-        if playbackOptions is None:
-            playbackOptions = self._defaultPlayOptions
-        if promptingOptions is None:
-            promptingOptions = self._defaultPromptOptions
-        self._ttsQueue.put((voice, prompt, generationOptions, playbackOptions, promptingOptions))
-
-    def _consumer_thread(self):
-        voice, prompt, genOptions, playOptions = None, None, None, None
-        while not self._interruptEvent.is_set():
-            try:
-                voice, prompt, genOptions, playOptions, promptOptions = self._ttsQueue.get(timeout=10)
-                playOptions = dataclasses.replace(playOptions, runInBackground=True) #Ensure this is set to true, always.
-            except queue.Empty:
-                continue
-            finally:
-                if self._interruptEvent.is_set():
-                    logging.debug("Synthetizer consumer loop exiting...")
-                    return
-
-            logging.debug(f"Synthesizing prompt: {prompt}")
-            self._generate_events_and_begin(voice, prompt, genOptions, playOptions, promptOptions)
-
-    def _generate_events_and_begin(self, voice:Voice, prompt:str, generationOptions:GenerationOptions, playbackOptions:PlaybackOptions, promptingOptions:PromptingOptions):
-        newEvent = threading.Event()
-
-        def startcallbackfunc():
-            newEvent.wait()
-            if self._interruptEvent.is_set():
-                raise sounddevice.CallbackAbort
-            playbackOptions.onPlaybackStart()
-        def endcallbackfunc():
-            playbackOptions.onPlaybackEnd()
-            self._readyForPlaybackEvent.set()
-
-        wrapped_playbackOptions = PlaybackOptions(runInBackground=True, portaudioDeviceID=playbackOptions.portaudioDeviceID, onPlaybackStart=startcallbackfunc, onPlaybackEnd=endcallbackfunc)
-
-        _, streamFuture, _ = voice.generate_stream_audio_v2(prompt=prompt, generationOptions=generationOptions, playbackOptions=wrapped_playbackOptions, promptingOptions=promptingOptions)
-        self._eventStreamQueue.put((newEvent, streamFuture))
-
-    def _ordering_thread(self):
-        nextEvent, nextStreamFuture = None, None
-        while not self._interruptEvent.is_set():
-            self._readyForPlaybackEvent.wait()
-            self._readyForPlaybackEvent.clear()
-            while not self._interruptEvent.is_set():
-                try:
-                    nextEvent, nextStreamFuture = self._eventStreamQueue.get(timeout=10)
-                except queue.Empty:
-                    continue
-                finally:
-                    if self._interruptEvent.is_set():
-                        logging.debug("Synthetizer playback loop exiting...")
-                        break
-                nextEvent.set()
-                self._currentStream = nextStreamFuture.result()
-                break
-        while True:
-            try:
-                nextEvent, nextStreamFuture = self._eventStreamQueue.get_nowait()
-            except queue.Empty:
-                break
-            nextEvent.set() #Just set all of them so they exit.
-
-class ReusableInputStreamer:
-    """
-    This is basically a reusable wrapper around a websocket connection.
-    """
-    def __init__(self, voice:Voice,
-                 defaultPlaybackOptions:PlaybackOptions=PlaybackOptions(runInBackground=True),
-                 generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
-                 websocketOptions:WebsocketOptions=WebsocketOptions()
-                 ):
-        self._voice = voice
-        self._websocket_ready_event = threading.Event()
-        self._generationOptions = generationOptions
-        self._defaultPlayOptions = defaultPlaybackOptions
-        self._interruptEvent = threading.Event()
-        self._currentStream: sd.OutputStream = None
-        self._websocket: websockets.sync.client.ClientConnection = None
-        self._websocketOptions = websocketOptions
-        self._currentGenOptions: GenerationOptions = None   #These are the options tied to the current voice.
-        self._last_renewal_time = 0
-        self._ping_thread = threading.Thread(target=self._ping_function)
-        self._iterator_queue = queue.Queue()
-
-        self._renew_socket()
-        self._ping_thread.start()
-        threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
-
-    def change_voice(self, voice:Voice):
-        self._voice = voice
-        self._renew_socket()
-    def stop(self):
-        """
-        Stops playing back audio once the current one is finished.
-        """
-        self._interruptEvent.set()
-
-    def abort(self):
-        """
-        Stops playing back audio immediately.
-        """
-        self.stop()
-        if self._currentStream is not None:
-            self._currentStream.stop()
-        if self._websocket is not None:
-            self._websocket.close_socket()
-    def change_settings(self, generationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, websocketOptions:WebsocketOptions=None):
-        """
-        Allows you to change the settings and then re-establishes the socket.
-        """
-        if generationOptions is not None:
-            self._generationOptions = generationOptions
-
-        if defaultPlaybackOptions is not None:
-            self._defaultPlayOptions = defaultPlaybackOptions
-
-        if websocketOptions is not None:
-            self._websocketOptions = websocketOptions
-
-        self._renew_socket()
-    def _renew_socket(self):
-        self._websocket_ready_event.clear()
-        self._websocket = None
-        self._currentGenOptions = self._voice._complete_generation_options(self._generationOptions) # noqa - Yes, it's internal.
-        self._websocket = self._voice._generate_websocket(self._websocketOptions, self._generationOptions) # noqa - Yes, it's internal.
-        self._websocket_ready_event.set()
-        self._last_renewal_time = time.perf_counter()
-
-    def _ping_function(self):
-        while not self._interruptEvent.is_set():
-            self._websocket_ready_event.wait()
-            pong = self._websocket.ping()
-            ping_replied = pong.wait(timeout=1)
-            if (not ping_replied and not self._interruptEvent.is_set()) or time.perf_counter()-self._last_renewal_time > 17:
-                #websocket is dead or stale. Nuke it and set up a new one.
-                self._websocket.close_socket()
-                #Stale time is 17 seconds since websocket timeout is 20.
-                #This is required to avoid situations where a new audio might come in,
-                #and the websocket is used despite it actually being dead, because the ping timeout hasn't expired yet.
-                self._renew_socket()
-            time.sleep(3)   #Let's avoid hammering the websocket with pings...
-        self._websocket.close_socket()
-    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator], playbackOptions:PlaybackOptions=None) -> tuple[Future[sd.OutputStream], Future[queue.Queue]]:
-        """
-        Queues up an audio to be generated and played back.
-
-        Arguments:
-            prompt: The iterator to use for the generation.
-            playbackOptions: Overrides the playbackOptions for this generation.
-
-        Returns:
-            tuple: A tuple consisting of two futures, the one for the playback stream and the one for the transcript queue.
-        """
-        if self._interruptEvent.is_set():
-            raise ValueError("Do not re-use a closed ReusableInputStreamer!")
-        if playbackOptions is None:
-            playbackOptions = self._defaultPlayOptions
-        if inspect.isasyncgen(prompt):
-            prompt = SyncIterator(prompt)
-
-        playbackOptions = dataclasses.replace(playbackOptions)  #Ensure it's a copy.
-        transcript_queue_future = concurrent.futures.Future()
-        playback_stream_future = concurrent.futures.Future()
-
-        if not playbackOptions.runInBackground:
-            #Add an event and wait until it's done with the playback.
-            playback_done_event = threading.Event()
-            old_playbackend = playbackOptions.onPlaybackEnd
-            def wrapper():
-                playback_done_event.set()
-                old_playbackend()
-            playbackOptions.onPlaybackEnd = wrapper
-            self._iterator_queue.put((prompt, playbackOptions, playback_stream_future, transcript_queue_future ))
-            playback_done_event.wait()
-        else:
-            self._iterator_queue.put((prompt, playbackOptions, playback_stream_future, transcript_queue_future))
-        return playback_stream_future, transcript_queue_future
-
-    def _consumer_thread(self):
-        prompt, playbackOptions, stream_future, transcript_future = None, None, None, None
-        while not self._interruptEvent.is_set():
-            try:
-                prompt, playbackOptions, stream_future, transcript_future = self._iterator_queue.get(timeout=5)
-            except queue.Empty:
-                continue
-            finally:
-                if self._interruptEvent.is_set():
-                    return
-
-            while not self._websocket_ready_event.is_set():
-                self._websocket_ready_event.wait(timeout=1)
-
-                if self._interruptEvent.is_set():
-                    return
-
-            current_socket = self._websocket
-            threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
-
-            streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
-            temp_future = concurrent.futures.Future()
-            temp_future.set_result(current_socket)
-            if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
-            else:
-                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
-
-            transcript_future.set_result(streamer.transcript_queue)
-
-            player = _NumpyPlaybacker(streamer.playback_queue, playbackOptions, self._currentGenOptions)
-            streaming_thread = threading.Thread(target=streamer.begin_streaming)
-            playback_thread = threading.Thread(target=player.begin_playback, args=(stream_future,))
-            streaming_thread.start()
-            playback_thread.start()
-
-            self._currentStream = stream_future.result(timeout=60)
-
-            streaming_thread.join()
-            playback_thread.join()
-            current_socket.close_socket()
-
-class ReusableInputStreamerNoPlayback:
-    """
-    This is basically a reusable wrapper around a websocket connection.
-    """
-    def __init__(self, voice:Voice,
-                 generationOptions:GenerationOptions=GenerationOptions(latencyOptimizationLevel=3),
-                 websocketOptions:WebsocketOptions=WebsocketOptions()
-                 ):
-        self._voice = voice
-        self._websocket_ready_event = threading.Event()
-        self._generationOptions = generationOptions
-        self._interruptEvent = threading.Event()
-        self._websocket: websockets.sync.client.ClientConnection = None
-        self._websocketOptions = websocketOptions
-        self._currentGenOptions: GenerationOptions = None   #These are the options tied to the current voice.
-        self._last_renewal_time = 0
-        self._ping_thread = threading.Thread(target=self._ping_function)
-        self._iterator_queue = queue.Queue()
-
-        self._renew_socket()
-        self._ping_thread.start()
-        threading.Thread(target=self._consumer_thread).start()  # Starts the consumer thread
-
-    def change_voice(self, voice:Voice):
-        self._voice = voice
-        self._renew_socket()
-    def stop(self):
-        """
-        Stops the websocket.
-        """
-        self._interruptEvent.set()
-        if self._websocket is not None:
-            self._websocket.close_socket()
-
-    def abort(self):
-        """
-        Stops the websocket.
-        """
-        self.stop()
-        if self._websocket is not None:
-            self._websocket.close_socket()
-    def change_settings(self, generationOptions:GenerationOptions=None, defaultPlaybackOptions:PlaybackOptions=None, websocketOptions:WebsocketOptions=None):
-        """
-        Allows you to change the settings and then re-establishes the socket.
-        """
-        if generationOptions is not None:
-            self._generationOptions = generationOptions
-
-        if websocketOptions is not None:
-            self._websocketOptions = websocketOptions
-
-        self._renew_socket()
-    def _renew_socket(self):
-        self._websocket_ready_event.clear()
-        self._websocket = None
-        self._currentGenOptions = self._voice._complete_generation_options(self._generationOptions) # noqa - Yes, it's internal.
-        self._websocket = self._voice._generate_websocket(self._websocketOptions, self._generationOptions) # noqa - Yes, it's internal.
-        self._websocket_ready_event.set()
-        self._last_renewal_time = time.perf_counter()
-
-    def _ping_function(self):
-        while not self._interruptEvent.is_set():
-            self._websocket_ready_event.wait()
-            pong = self._websocket.ping()
-            ping_replied = pong.wait(timeout=1)
-            if (not ping_replied and not self._interruptEvent.is_set()) or time.perf_counter()-self._last_renewal_time > 17:
-                #websocket is dead or stale. Nuke it and set up a new one.
-                self._websocket.close_socket()
-                #Stale time is 17 seconds since websocket timeout is 20.
-                #This is required to avoid situations where a new audio might come in,
-                #and the websocket is used despite it actually being dead, because the ping timeout hasn't expired yet.
-                self._renew_socket()
-            time.sleep(3)   #Let's avoid hammering the websocket with pings...
-        self._websocket.close_socket()
-    def queue_audio(self, prompt:Union[Iterator[str], AsyncIterator]) -> tuple[Future[queue.Queue], Future[queue.Queue]]:
-        """
-        Queues up an audio to be generated and played back.
-
-        Arguments:
-            prompt: The iterator to use for the generation.
-        Returns:
-            tuple: A tuple consisting of two futures, one for the numpy audio queue and one for the transcript queue.
-        """
-        if self._interruptEvent.is_set():
-            raise ValueError("Do not re-use a closed ReusableInputStreamer!")
-
-        if inspect.isasyncgen(prompt):
-            prompt = SyncIterator(prompt)
-
-        transcript_queue_future = concurrent.futures.Future()
-        audio_queue_future = concurrent.futures.Future()
-
-        self._iterator_queue.put((prompt, audio_queue_future, transcript_queue_future))
-        return audio_queue_future, transcript_queue_future
-
-    def _consumer_thread(self):
-        prompt, audio_queue_future, transcript_queue_future = None, None, None
-        while not self._interruptEvent.is_set():
-            try:
-                prompt, audio_queue_future, transcript_queue_future = self._iterator_queue.get(timeout=5)
-            except queue.Empty:
-                continue
-            finally:
-                if self._interruptEvent.is_set():
-                    return
-
-            while not self._websocket_ready_event.is_set():
-                self._websocket_ready_event.wait(timeout=1)
-
-                if self._interruptEvent.is_set():
-                    return
-
-            current_socket = self._websocket
-            threading.Thread(target=self._renew_socket).start() # Forcefully renew socket now that it was already acquired.
-            streamer: Union[_NumpyMp3Streamer, _NumpyRAWStreamer]
-            temp_future = concurrent.futures.Future()
-            temp_future.set_result(current_socket)
-            if "mp3" in self._currentGenOptions.output_format:
-                streamer = _NumpyMp3Streamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
-            else:
-                streamer = _NumpyRAWStreamer(temp_future, self._currentGenOptions, self._websocketOptions, prompt, None)
-
-            audio_queue_future.set_result(streamer.playback_queue)
-            transcript_queue_future.set_result(streamer.transcript_queue)
-            streamer.begin_streaming()
-            current_socket.close_socket()
 
 
 def run_ai_speech_classifier(audioBytes:bytes):
@@ -1248,58 +813,6 @@ def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
 
 
 
-#Audio cutting/ONNX stuff.
-def sts_long_audio(source_audio:Union[bytes, BinaryIO], voice:Voice, generation_options:GenerationOptions = GenerationOptions(model="eleven_multilingual_sts_v2"), speech_threshold:float=0.5) -> bytes:
-    """
-    Allows you to process a long audio file with speech to speech automatically, using Silero-VAD to split it up naturally.
-
-    Arguments:
-        source_audio (bytes|BinaryIO): The source audio.
-        voice (Voice): The voice to use for STS.
-        generation_options (GenerationOptions): The generation options to use. The model specified must support STS.
-        speech_threshold (float): The likelyhood that a segment must be speech for it to be recognized (0.5/50% works for most audio files).
-    Returns:
-        bytes: The bytes of the final audio, all concatenated, in mp3 format.
-    """
-    if isinstance(source_audio, io.IOBase):
-        source_audio.seek(0)
-        source_audio = source_audio.read()
-
-    #Only mp3 works. So we default to mp3 highest.
-    if "mp3" not in generation_options.output_format:
-        generation_options = dataclasses.replace(generation_options, output_format="mp3_highest")
-        generation_options = voice.linkedUser.get_real_audio_format(generation_options)
-
-    audio_segments = split_audio(source_audio, speech_threshold=speech_threshold)
-
-    destination_io = io.BytesIO()
-    tts_segments:List[bytes] = []
-    tts_futures:List[concurrent.futures.Future] = []
-
-    #Queue them all up for generation
-    for idx, audio_io in enumerate(audio_segments):
-        audio_io.seek(0)
-        tts_future, _ = voice.generate_audio_v3(audio_io, generation_options=generation_options)
-        tts_futures.append(tts_future)
-
-    #Get the results
-    for idx, tts_future in enumerate(tts_futures):
-        tts_segment = tts_future.result()
-        data, samplerate = sf.read(io.BytesIO(tts_segment), dtype="float32")
-        tts_segments.append(data)
-
-    concatenated_samples = np.concatenate(tts_segments)
-
-    #Technically, the section below is useless. I'm keeping it just in case they add support for other formats for STS.
-    audio_extension = ""
-    if "mp3" in generation_options.output_format: audio_extension = "mp3"
-    if "pcm" in generation_options.output_format: audio_extension = "wav"
-    if "ulaw" in generation_options.output_format: audio_extension = "wav"
-
-    save_audio_v2(concatenated_samples, destination_io, audio_extension, generation_options)
-    destination_io.seek(0)
-
-    return destination_io.read()
 
 
 class _AudioStreamer:

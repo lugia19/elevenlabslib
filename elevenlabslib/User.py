@@ -772,7 +772,7 @@ class User:
 
         return pdicts
 
-    def generate_sfx(self, prompt: str, sfx_generation_options: SFXGenerationOptions = SFXGenerationOptions()) -> \
+    def generate_sfx(self, prompt: str, sfx_generation_options: SFXOptions = SFXOptions()) -> \
             tuple[Future[bytes], Future[GenerationInfo]]:
         """
         Generates a sound effect from a text prompt and returns the audio data as bytes.
@@ -782,7 +782,7 @@ class User:
 
         Args:
             prompt (str): The text prompt..
-            sfx_generation_options (SFXGenerationOptions): Options for the SFX generation, such as duration, prompt adherence.
+            sfx_generation_options (SFXOptions): Options for the SFX generation, such as duration, prompt adherence.
         Returns:
             tuple[Future[bytes], Optional[GenerationInfo]]:
             - A future that will contain the bytes of the audio file once the generation is complete.
@@ -1033,8 +1033,3 @@ class User:
         """
         response = _api_get(f"/dubbing/{dubbing_id}", headers=self.headers)
         return Dub(response.json(), self)
-
-class ElevenLabsUser(User):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use User instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)

@@ -41,9 +41,3 @@ class Sample(_PlayableItem):
         """
         response = _api_del("/voices/" + self._parentVoice.voiceID + "/samples/" + self.sampleID, self._parentVoice.linkedUser.headers)
         self.sampleID = ""
-
-
-class ElevenLabsSample(Sample):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use Sample instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)

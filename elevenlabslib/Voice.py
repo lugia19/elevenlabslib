@@ -807,29 +807,3 @@ class LibraryVoiceData:
         # Metadata for less frequently accessed or auxiliary information
         self.all_metadata = lib_voice_data
 
-#This way lies only madness.
-class ElevenLabsVoice(Voice):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use Voice instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)
-
-class ElevenLabsEditableVoice(EditableVoice):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use EditableVoice instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)
-
-
-class ElevenLabsDesignedVoice(DesignedVoice):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use DesignedVoice instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)
-
-class ElevenLabsProfessionalVoice(ProfessionalVoice):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use ProfessionalVoice instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)
-
-class ElevenLabsClonedVoice(ClonedVoice):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use ClonedVoice instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)

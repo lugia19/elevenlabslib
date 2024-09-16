@@ -67,8 +67,3 @@ class Model:
                 "name":language["name"]
             })
         return languageList
-
-class ElevenLabsModel(Model):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use Model instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)

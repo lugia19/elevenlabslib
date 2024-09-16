@@ -132,14 +132,14 @@ class HistoryItem(_PlayableItem):
         dt = self.timestamp
         date_string = dt.strftime('%Y-%m-%d')
         time_string = dt.strftime('%H_%M_%S')
-        category_string = category_shorthands.get(self.voiceCategory)
+        category_string = CategoryShorthands[self.voiceCategory]
 
         genSettings = self.generation_settings
         settings_string = f"s{round(genSettings.stability*100)}_sb{round(genSettings.similarity_boost*100)}"
         if "v2" in genSettings.model_id:
             settings_string += f"_se{round(genSettings.style*100)}{'_b' if genSettings.use_speaker_boost else ''}"
 
-        model_string = model_shorthands.get(genSettings.model_id, None)
+        model_string = ModelShorthands[genSettings.model_id]
         filename = f"ElevenLabs_{date_string}T{time_string}_{self.voiceName}_{category_string}_{settings_string}{'_'+model_string if model_string else ''}"
 
         #This is just here to be implemented in the future. Right now, both PCM and mp3 audio get a .mp3 extension on the API.
@@ -259,10 +259,3 @@ class HistoryItem(_PlayableItem):
         """
         response = _api_del("/history/" + self.historyID, self._parentUser.headers)
         self.historyID = ""
-
-
-
-class ElevenLabsHistoryItem(HistoryItem):
-    def __init__(self, *args, **kwargs):
-        warn("This name is deprecated and will be removed in future versions. Use HistoryItem instead.", DeprecationWarning)
-        super().__init__(*args, **kwargs)
