@@ -29,7 +29,7 @@ historyItem.delete()
 ## Speech to speech on a long file (eg, an audiobook)
 ```python
 from elevenlabslib import *
-from elevenlabslib.helpers import *
+from elevenlabslib.utils import sts_long_audio
 
 user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
@@ -116,6 +116,7 @@ voice.stream_audio_v3("This audio will have its volume increased.",
 ```python
 import threading
 from elevenlabslib import *
+from elevenlabslib.utils import ReusableInputStreamer
 
 user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
@@ -151,7 +152,7 @@ user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 #Low stability makes prompting more effective.
 generation_options = GenerationOptions(stability=0.1)
-prompting_options = PromptingOptions(post_prompt="she shouted angrily.")
+prompting_options = StitchingOptions(next_text="she shouted angrily.")
 
 #The spoken audio will only contain chosen text, and will cut out the pre/post prompt.
 voice.stream_audio_v3("I've had enough!", generation_options=generation_options,
@@ -180,8 +181,7 @@ generation_options = GenerationOptions(model="eleven_multilingual_v2", style=0.2
 
 #The library takes care of setting these values by default, I'm only overwriting them here to show them.
 websocket_options = WebsocketOptions(chunk_length_schedule=[125],
-                                     try_trigger_generation=False,
-                                     buffer_char_length=150)
+                                     try_trigger_generation=False)
 
 #This will now work without stuttering, but it will add some extra latency before playback begins.
 voice.stream_audio_v3(write(),
@@ -190,7 +190,7 @@ voice.stream_audio_v3(write(),
                                websocket_options=websocket_options)
 ```
 
-## Force the pronunciation of a word
+## Add and use a pronunciation dictionary
 
 ```python
 from elevenlabslib import *
@@ -198,20 +198,12 @@ from elevenlabslib import *
 user = User("YOUR_API_KEY")
 voice = user.get_available_voices()[0]
 
-#This means 'test' will be pronounced as 'tomato'.
-forced_pronunciations = {
-    "test":
-        {
-            "alphabet": "ipa",
-            "pronunciation": "təˈmeɪtoʊ"
-        }
-}
+new_dictionary = user.add_pronunciation_dictionary("new_dictionary", "", "path_to_dictionary.pls")
 
 voice.stream_audio_v3("This is a test. Both instances of test will be pronounced as tomato.",
                                playback_options=PlaybackOptions(runInBackground=False),
                                generation_options=GenerationOptions(model="eleven_monolingual_v1",
-                                                                   forced_pronunciations=forced_pronunciations))
-
+                                                                   pronunciation_dictionaries=[new_dictionary]))
 ```
 
 ## Generate audio in PCM format
@@ -231,6 +223,7 @@ audioData = premadeVoice.generate_audio_v3("This is a test.", GenerationOptions(
 
 ```python
 from elevenlabslib import *
+from elevenlabslib.utils import Synthesizer
 
 api_key = "api_key"
 user = User(api_key)
