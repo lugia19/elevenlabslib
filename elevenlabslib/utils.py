@@ -46,26 +46,32 @@ from elevenlabslib.Model import Model
 from elevenlabslib import *
 from elevenlabslib._audio_cutter_helper import split_audio
 
-def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None):
+def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None,
+                               default_playback_options:PlaybackOptions() = PlaybackOptions()):
     """
     This function generates and plays back a series of audios using request stitching.
 
     Arguments:
         - voice (Voice): The voice to use
-        - prompts (List[str|Dict[str,str]]): The list of texts to be generated, containing either strings or dicts which have both a 'prompt' and a 'next_text', so it can be manually overwritten.
+        - prompts (List[str|Dict[str,str]]): The list of texts to be generated, containing either strings or dicts which have both a 'prompt' and a 'next_text', so it can be manually overridden. They can also optionally contain a 'playback_options'.
         - generation_options (GenerationOptions, optional): The GenerationOptions to use.
         - first_prompt_pretext (str, optional): The previous_text to use for the first generation.
+        - default_playback_options (PlaybackOptions, optional): The PlaybackOptions to apply to every generation, unless overridden.
     """
     previous_generations = []
     prompts_length = len(prompts)
     for idx, prompt in enumerate(prompts):
         stitching_options = StitchingOptions()
+        playback_options:PlaybackOptions = default_playback_options
         if idx < prompts_length-1:
             stitching_options.next_text = prompts[idx+1]
 
         if isinstance(prompt, dict):
             stitching_options.next_text = prompt["next_text"]
             prompt = prompt["prompt"]
+            if "playback_options" in prompt:
+                playback_options = prompt["playback_options"]
+        playback_options.runInBackground = False
 
 
         if idx > 0:
