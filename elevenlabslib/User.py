@@ -440,49 +440,38 @@ class User:
 
         return self.get_voice_by_ID(response.json()["voice_id"])
 
-
-    def clone_voice_by_path(self, name:str, samples: list[str]|str) -> ClonedVoice:
+    def clone_voice(self, name:str, samples:Union[list[str],dict[str, bytes]], description:str = "", remove_background_noise:bool = False, labels:dict[str, str]=None):
         """
-            Create a new ClonedVoice object by providing the voice name and a list of sample file paths.
+        Create a new ClonedVoice object from the given samples.
 
-            Args:
-                name (str): Name of the voice to be created.
-                samples (list[str]|str): List of file paths for the voice samples (or a single path).
-
-            Returns:
-                ClonedVoice: The new voice.
+        Args:
+            name (str): Name of the voice to be created.
+            samples (list[str]|dict[str, bytes]): List of file paths OR dictionary of sample file names and bytes for the voice samples.
+            description (str, Optional): The description of the voice.
+            remove_background_noise (bool, optional): Whether to automatically remove background noise. Defaults to false, can worsen quality if noise is not present.
+            labels (dict[str, str], optional): The labels to add to the voice.
+        Returns:
+            ClonedVoice: The new voice.
         """
-        if isinstance(samples, str):
-            samples = list(samples)
+        if isinstance(samples, list):
+            if not (0 < len(samples) <= 25):
+                raise ValueError("Please include between 1 and 25 samples.")
+            sampleBytes = {}
+            for samplePath in samples:
+                if "\\" in samplePath:
+                    fileName = samplePath[samplePath.rindex("\\") + 1:]
+                else:
+                    fileName = samplePath
+                sampleBytes[fileName] = open(samplePath, "rb").read()
+        else:
+            sampleBytes = samples
 
-        sampleBytes = {}
-        for samplePath in samples:
-            if "\\" in samplePath:
-                fileName = samplePath[samplePath.rindex("\\") + 1:]
-            else:
-                fileName = samplePath
-            sampleBytes[fileName] = open(samplePath, "rb").read()
-        return self.clone_voice_bytes(name, sampleBytes)
+        if not labels:
+            labels = dict()
 
-    def clone_voice_bytes(self, name:str, samples: dict[str, bytes]) -> ClonedVoice:
-        """
-            Create a new ClonedVoice object by providing the voice name and a dictionary of sample file names and bytes.
-
-            Args:
-                name (str): Name of the voice to be created.
-                samples (dict[str, bytes]): Dictionary of sample file names and bytes for the voice samples.
-
-            Returns:
-                ClonedVoice: The new voice.
-            """
-        if len(samples.keys()) == 0:
-            raise Exception("Please add at least one sample!")
-        if len(samples.keys()) > 25:
-            raise Exception("Please only add a maximum of 25 samples.")
-
-        payload = {"name": name}
+        payload = {"name": name, "description":description, "remove_background_noise": remove_background_noise, "labels":str(labels)}
         files = list()
-        for fileName, fileBytes in samples.items():
+        for fileName, fileBytes in sampleBytes.items():
             files.append(("files", (fileName, io.BytesIO(fileBytes))))
         response = _api_multipart("/voices/add", self._headers, data=payload, filesData=files)
         return self.get_voice_by_ID(response.json()["voice_id"])
