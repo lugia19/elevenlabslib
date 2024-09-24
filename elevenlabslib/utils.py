@@ -60,12 +60,15 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
         - auto_determine_emotion (bool, optional): Whether to automatically try to determine the emotion of the text, and insert next_text accordingly. Defaults to false.
     """
     #Let's try and determine the overall emotion of the dialog.
-    if isinstance(prompts, dict):
-        all_text = " ".join(prompts.values())
+    if auto_determine_emotion:
+        if isinstance(prompts, dict):
+            all_text = " ".join(prompts.values())
+        else:
+            all_text = " ".join(prompts)
+        from elevenlabslib.helpers import get_emotion_for_prompt, emotion_prompts
+        dialog_emotion = get_emotion_for_prompt(all_text)
     else:
-        all_text = " ".join(prompts)
-    from elevenlabslib.helpers import get_emotion_for_prompt, emotion_prompts
-    dialog_emotion = get_emotion_for_prompt(all_text)
+        dialog_emotion = "neutral"
 
     previous_generations = []
     prompts_length = len(prompts)
