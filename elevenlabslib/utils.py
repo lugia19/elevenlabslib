@@ -71,6 +71,8 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
 
         if isinstance(prompt, dict):
             stitching_options.next_text = prompt["next_text"]
+            if stitching_options.next_text and stitching_options.next_text != "":
+                stitching_options.auto_next_text = False
             prompt = prompt["prompt"]
             if "playback_options" in prompt:
                 playback_options = prompt["playback_options"]
