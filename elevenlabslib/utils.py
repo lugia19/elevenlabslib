@@ -47,7 +47,7 @@ from elevenlabslib import *
 from elevenlabslib._audio_cutter_helper import split_audio
 
 def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], generation_options:GenerationOptions = GenerationOptions(), first_prompt_pretext:Optional[str] = None,
-                               default_playback_options:PlaybackOptions() = PlaybackOptions()):
+                               default_playback_options:PlaybackOptions() = PlaybackOptions(), auto_determine_emotion:bool = False):
     """
     This function generates and plays back a series of audios using request stitching.
 
@@ -57,13 +57,22 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
         - generation_options (GenerationOptions, optional): The GenerationOptions to use.
         - first_prompt_pretext (str, optional): The previous_text to use for the first generation.
         - default_playback_options (PlaybackOptions, optional): The PlaybackOptions to apply to every generation, unless overridden.
+        - auto_determine_emotion (bool, optional): Whether to automatically try to determine the emotion of the text, and insert next_text accordingly. Defaults to false.
     """
+    #Let's try and determine the overall emotion of the dialog.
+    if isinstance(prompts, dict):
+        all_text = " ".join(prompts.values())
+    else:
+        all_text = " ".join(prompts)
+    from elevenlabslib.helpers import get_emotion_for_prompt, emotion_prompts
+    dialog_emotion = get_emotion_for_prompt(all_text)
+
     previous_generations = []
     prompts_length = len(prompts)
     for idx, prompt in enumerate(prompts):
         stitching_options = StitchingOptions()
         playback_options:PlaybackOptions = default_playback_options
-        if idx < prompts_length-1:
+        if idx < prompts_length-1 and not auto_determine_emotion:
             stitching_options.next_text = prompts[idx+1]
 
         if isinstance(prompt, dict):
@@ -73,6 +82,8 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
                 playback_options = prompt["playback_options"]
         playback_options.runInBackground = False
 
+        if (stitching_options.next_text is None or stitching_options.next_text == "") and auto_determine_emotion:
+            stitching_options.next_text = emotion_prompts[dialog_emotion]
 
         if idx > 0:
             stitching_options.previous_request_ids = previous_generations[-3:]

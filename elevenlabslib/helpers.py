@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import websockets
 import websockets.sync.client
+from tokenizers import Tokenizer
 
 # These are hardcoded because they just plain work. If you really want to change them, please be careful.
 _playbackBlockSize = 2048
@@ -56,6 +57,8 @@ apiEndpoint = api_endpoint
 
 default_sts_model = "eleven_multilingual_sts_v2"
 
+_roberta_model = None
+_roberta_model_lock = threading.Lock()
 class CategoryShorthands(Enum):
     generated = "gen"
     professional = "pvc"
@@ -272,7 +275,7 @@ class GenerationOptions:
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
     use_speaker_boost: Optional[bool] = None
-    model: Optional[Union[Model, str]] = "eleven_monolingual_v1"
+    model: Optional[Union[Model, str]] = "eleven_multilingual_v2"
     output_format:str = "mp3_highest"
     seed:Optional[int] = None
     language_code: Optional[str] = None
@@ -326,6 +329,56 @@ class WebsocketOptions:
             if not(50 <= value <= 500):
                 raise ValueError("Chunk length outside the [50,500] range.")
 
+emotion_prompts = {
+        'admiration': "she said admiringly.",
+        'amusement': "she said with amusement.",
+        'anger': "she said angrily.",
+        'annoyance': "she said with annoyance.",
+        'approval': "she said approvingly.",
+        'caring': "she said caringly.",
+        'confusion': "she said with confusion.",
+        'curiosity': "she said curiously.",
+        'desire': "she said with desire.",
+        'disappointment': "she said with disappointment.",
+        'disapproval': "she said disapprovingly.",
+        'disgust': "she said with disgust.",
+        'embarrassment': "she said embarrassedly.",
+        'excitement': "she said excitedly.",
+        'fear': "she said fearfully.",
+        'gratitude': "she said gratefully.",
+        'grief': "she said with grief.",
+        'joy': "she said joyfully.",
+        'love': "she said lovingly.",
+        'nervousness': "she said nervously.",
+        'optimism': "she said optimistically.",
+        'pride': "she said proudly.",
+        'realization': "she said with realization.",
+        'relief': "she said with relief.",
+        'remorse': "she said remorsefully.",
+        'sadness': "she said sadly.",
+        'surprise': "she said with surprise.",
+        'neutral': ""
+    }
+
+def get_emotion_for_prompt(prompt:str) -> str:
+    global _roberta_model
+    with _roberta_model_lock:
+        if _roberta_model is None:
+            model_url = "https://huggingface.co/SamLowe/roberta-base-go_emotions-onnx/resolve/main/onnx/model_quantized.onnx"
+            from elevenlabslib._audio_cutter_helper import _download_onnx_model
+            try:
+                model_path = _download_onnx_model(model_url, "roberta.onnx")
+                _roberta_model = _RobertaWrapper(model_path)
+            except requests.exceptions.Timeout:
+                _roberta_model = None
+    if _roberta_model:
+        start_time = time.time()
+        emotion = _roberta_model.get_emotions([prompt])[0]
+        print(f"Time elapsed: {time.time()-start_time}")
+        return emotion
+    else:
+        return "neutral"
+
 @dataclasses.dataclass
 class StitchingOptions:
     """
@@ -336,16 +389,19 @@ class StitchingOptions:
         next_text (str, optional): Prompt which will be placed after the quoted text.
         previous_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated before this generation. Overrides previous_text.
         next_request_ids (list[int|HistoryItem], optional): A list of request_ids or HistoryItems generated after this generation. Overrides next_text.
+        auto_next_text (bool, optional): Automatically appends a next_text appropriate for the prompt. Defaults to false, disabled if next_text is included.
     """
     previous_text:Optional[str] = None
     next_text:Optional[str] = None
     previous_request_ids: Optional[List[Union[int, HistoryItem]]] = None
     next_request_ids:Optional[List[Union[int, HistoryItem]]] = None
+    auto_next_text:bool = False
 
     def __post_init__(self):
         self.previous_request_ids = [(x if isinstance(x, int) else x.requestID) for x in self.previous_request_ids] if self.previous_request_ids else None
         self.next_request_ids = [(x if isinstance(x, int) else x.requestID) for x in self.next_request_ids] if self.next_request_ids else None
-
+        if self.next_text is not None:
+            self.auto_next_text = False
 
 def PromptingOptions(pre_prompt: str = "", post_prompt: str = "",
                      open_quote_duration_multiplier: Optional[float] = None,
@@ -1241,3 +1297,42 @@ class _NumpyPlaybacker:
             logging.debug("Callback got empty data from the queue.")
         else:
             outdata[:] = readData
+
+
+class _RobertaWrapper:
+    def __init__(self, model_path):
+        self.tokenizer = Tokenizer.from_pretrained("SamLowe/roberta-base-go_emotions")
+        params = {**self.tokenizer.padding, "length": None}
+        self.tokenizer.enable_padding(**params)
+
+        import onnxruntime
+        _options = onnxruntime.SessionOptions()
+        _options.inter_op_num_threads, _options.intra_op_num_threads = os.cpu_count(), os.cpu_count()
+        _providers = ["CPUExecutionProvider"]
+        self.model = onnxruntime.InferenceSession(path_or_bytes=model_path, sess_options=_options, providers=_providers)
+
+        self.output_names = [self.model.get_outputs()[0].name]
+
+        self.labels = ['admiration', 'amusement', 'anger', 'annoyance', 'approval', 'caring', 'confusion', 'curiosity', 'desire', 'disappointment', 'disapproval', 'disgust', 'embarrassment',
+                       'excitement', 'fear', 'gratitude', 'grief', 'joy', 'love', 'nervousness', 'optimism', 'pride', 'realization', 'relief', 'remorse', 'sadness', 'surprise', 'neutral']
+
+    def _sigmoid(self, x):
+        return 1.0 / (1.0 + np.exp(-x))
+
+    def get_emotions(self, sentences):
+        tokens_obj = self.tokenizer.encode_batch(sentences)
+
+        input_feed_dict = {
+            "input_ids": [t.ids for t in tokens_obj],
+            "attention_mask": [t.attention_mask for t in tokens_obj]
+        }
+
+        logits = self.model.run(output_names=self.output_names, input_feed=input_feed_dict)[0]
+        model_outputs = self._sigmoid(logits)
+
+        emotion_labels = []
+        for probas in model_outputs:
+            top_result_index = np.argmax(probas)
+            emotion_labels.append(self.labels[top_result_index])
+
+        return emotion_labels

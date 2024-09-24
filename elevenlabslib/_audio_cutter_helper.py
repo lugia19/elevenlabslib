@@ -236,13 +236,13 @@ def _get_speech_timestamps(audio: np.ndarray,
     return speeches
 
 
-def _download_onnx_model(model_url):
+def _download_onnx_model(model_url, model_filename):
     # Define the cache directory and ensure it exists
     cache_dir = appdirs.user_cache_dir("elevenlabslib", "lugia19")
     os.makedirs(cache_dir, exist_ok=True)
 
     # Define the path to the model and the lock file
-    model_path = os.path.join(cache_dir, "silero_vad.onnx")
+    model_path = os.path.join(cache_dir, model_filename)
     lock_file_path = model_path + ".lock"
 
     # Check if the model already exists
@@ -287,7 +287,7 @@ def _get_silero_model(force_onnx_cpu=False):
     with _silero_model_lock:
         if _silero_model is None:
             model_url = "https://github.com/snakers4/silero-vad/raw/master/files/silero_vad.onnx"
-            model_path = _download_onnx_model(model_url)
+            model_path = _download_onnx_model(model_url, "silero_vad.onnx")
             _silero_model = _OnnxWrapper(model_path, force_onnx_cpu)
     return _silero_model
 

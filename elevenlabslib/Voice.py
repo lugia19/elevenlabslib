@@ -204,14 +204,16 @@ class Voice:
                 "model_id": model_id,
                 "text": prompt,
                 "seed": generation_options.seed,
-                "language_code": generation_options.language_code,
-                "previous_text": stitching_options.previous_text,
-                "next_text": stitching_options.next_text
+                "language_code": generation_options.language_code
             }
 
             if stitching_options:
                 payload["previous_text"] = stitching_options.previous_text
-                payload["next_text"] = stitching_options.next_text
+                if not stitching_options.auto_next_text:
+                    payload["next_text"] = stitching_options.next_text
+                else:
+                    payload["next_text"] = emotion_prompts[get_emotion_for_prompt(prompt)]
+
                 if stitching_options.previous_request_ids:
                     payload["previous_request_ids"] = stitching_options.previous_request_ids
 
