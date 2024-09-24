@@ -372,10 +372,7 @@ def get_emotion_for_prompt(prompt:str) -> str:
             except requests.exceptions.Timeout:
                 _roberta_model = None
     if _roberta_model:
-        start_time = time.time()
-        emotion = _roberta_model.get_emotions([prompt])[0]
-        print(f"Time elapsed: {time.time()-start_time}")
-        return emotion
+        return _roberta_model.get_emotions([prompt])[0]
     else:
         return "neutral"
 

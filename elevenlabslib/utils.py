@@ -75,19 +75,19 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
     prompts_length = len(prompts)
     for idx, prompt in enumerate(prompts):
         stitching_options = StitchingOptions()
-        playback_options:PlaybackOptions = default_playback_options
-        if idx < prompts_length-1 and not auto_determine_emotion:
-            stitching_options.next_text = prompts[idx+1]
+        playback_options: PlaybackOptions = default_playback_options
+        if idx < prompts_length - 1 and not auto_determine_emotion:
+            stitching_options.next_text = prompts[idx + 1]
+        elif auto_determine_emotion:
+            stitching_options.next_text = emotion_prompts[dialog_emotion]
 
         if isinstance(prompt, dict):
-            stitching_options.next_text = prompt["next_text"]
+            if prompt["next_text"] and prompt["next_text"] != "":
+                stitching_options.next_text = prompt["next_text"]
             prompt = prompt["prompt"]
             if "playback_options" in prompt:
                 playback_options = prompt["playback_options"]
         playback_options.runInBackground = False
-
-        if (stitching_options.next_text is None or stitching_options.next_text == "") and auto_determine_emotion:
-            stitching_options.next_text = emotion_prompts[dialog_emotion]
 
         if idx > 0:
             stitching_options.previous_request_ids = previous_generations[-3:]
