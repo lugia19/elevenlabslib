@@ -59,14 +59,6 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
         - default_playback_options (PlaybackOptions, optional): The PlaybackOptions to apply to every generation, unless overridden.
         - auto_determine_emotion (bool, optional): Whether to automatically try to determine the emotion of the text, and insert next_text accordingly. Defaults to false.
     """
-    #Let's try and determine the overall emotion of the dialog.
-    if isinstance(prompts, dict):
-        all_text = " ".join(prompts.values())
-    else:
-        all_text = " ".join(prompts)
-    from elevenlabslib.helpers import get_emotion_for_prompt, emotion_prompts
-    dialog_emotion = get_emotion_for_prompt(all_text)
-
     previous_generations = []
     prompts_length = len(prompts)
     for idx, prompt in enumerate(prompts):
@@ -74,6 +66,8 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
         playback_options:PlaybackOptions = default_playback_options
         if idx < prompts_length-1 and not auto_determine_emotion:
             stitching_options.next_text = prompts[idx+1]
+        else:
+            stitching_options.auto_next_text = True
 
         if isinstance(prompt, dict):
             stitching_options.next_text = prompt["next_text"]
@@ -82,8 +76,6 @@ def play_dialog_with_stitching(voice:Voice, prompts:List[str | Dict[str, str]], 
                 playback_options = prompt["playback_options"]
         playback_options.runInBackground = False
 
-        if (stitching_options.next_text is None or stitching_options.next_text == "") and auto_determine_emotion:
-            stitching_options.next_text = emotion_prompts[dialog_emotion]
 
         if idx > 0:
             stitching_options.previous_request_ids = previous_generations[-3:]
