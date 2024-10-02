@@ -12,7 +12,8 @@ if TYPE_CHECKING:
     from elevenlabslib.User import User
 
 from elevenlabslib.helpers import *
-from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _reformat_transcript, _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker
+from elevenlabslib.helpers import _api_json, _api_del, _api_get, _api_multipart, _api_tts_with_concurrency, _reformat_transcript, _NumpyMp3Streamer, _NumpyRAWStreamer, _NumpyPlaybacker, _pcm_to_wav, \
+    _ulaw_to_wav
 
 
 class Voice:

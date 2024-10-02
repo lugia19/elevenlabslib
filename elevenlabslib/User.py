@@ -915,8 +915,8 @@ class User:
         """
         Returns the usage stats for the user.
         Parameters:
-            start_time (datetime.datetime|int): The start of the usage window
-            end_time (datetime.datetime|int, Optional): The end of the usage window. Defaults to today's date.
+            start_time (datetime.datetime|int): The start of the usage window in MILLIseconds.
+            end_time (datetime.datetime|int, Optional): The end of the usage window in MILLIseconds. Defaults to today's date.
             include_workspace_metrics (bool, Optional): Whether to include workspace metrics. Defaults to false.
             breakdown_type (str, Optional): How to break down the results. Must be one of none, voice, user, api_keys, product_type.
 
