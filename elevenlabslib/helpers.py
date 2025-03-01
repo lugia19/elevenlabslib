@@ -324,10 +324,16 @@ class WebsocketOptions:
         chunk_length_schedule (list[int], optional): Chunking schedule for generation. If you pass [50, 120, 500], the first audio chunk will be generated after recieving 50 characters, the second after 120 more (so 170 total), and the third onwards after 500. Defaults to [50], so always generating ASAP.
         try_trigger_generation (bool, optional): Whether to try and generate a chunk of audio at >50 characters, regardless of the chunk_length_schedule. Defaults to False, sent with every message (but can be overridden).
         enable_ssml_parsing (bool, optional): Whether to enable parsing of SSML tags, such as breaks or pronunciations. Increases latency. Defaults to False.
+        inactivity_timeout (float, optional): The time in seconds to wait before closing the connection if no messages are sent. Defaults to 20.
+        sync_alignment (bool, optional): Whether to include timing data with every audio chunk. Defaults to False.
+        auto_mode (bool, optional): Reduces latency by disabling all buffers. It is ONLY recommended when sending full sentences or phrases. Defaults to False.
     """
     try_trigger_generation: bool = False
     chunk_length_schedule: List[int] = dataclasses.field(default_factory=lambda: [125])
     enable_ssml_parsing: bool = False
+    inactivity_timeout: Optional[float] = 20
+    sync_alignment: bool = False
+    auto_mode: bool = False
     def __post_init__(self):
         for value in self.chunk_length_schedule:
             if not(50 <= value <= 500):

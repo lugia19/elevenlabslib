@@ -297,6 +297,9 @@ class Voice:
         for key, value in self._generate_parameters(generationOptions).items():
             websocketURL += f"&{key}={value}"
         websocketURL += f"&enable_ssml_parsing={str(websocketOptions.enable_ssml_parsing).lower()}"
+        websocketURL += f"&inactivity_timeout={str(websocketOptions.inactivity_timeout).lower()}"
+        websocketURL += f"&sync_alignment={str(websocketOptions.sync_alignment).lower()}"
+        websocketURL += f"&auto_mode={str(websocketOptions.auto_mode).lower()}"
 
         if generationOptions.language_code:
             websocketURL += f"&language_code={generationOptions.language_code}"
