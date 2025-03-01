@@ -1,8 +1,12 @@
 from __future__ import annotations
+
+import mimetypes
+import os
 from typing import Dict, Optional, List
 
-from elevenlabslib import User, PronunciationDictionary
-from elevenlabslib.helpers import _api_del, _api_json, _api_get, _PlayableItem
+from elevenlabslib import User
+from elevenlabslib.PronunciationDictionary import PronunciationDictionary
+from elevenlabslib.helpers import _api_del, _api_json, _api_get, _PlayableItem, _api_multipart
 
 
 class Project:
@@ -33,12 +37,11 @@ class Project:
             'last_conversion_date_unix': json_data.get('last_conversion_date_unix')
         }
 
-
     def update_data(self):
         """
         Updates the project's information.
         """
-        response = _api_get(f"/projects/{self.project_id}", headers=self.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project_id}", headers=self.linkedUser.headers)
         json_data = response.json()
         self.can_be_downloaded: bool = json_data.get('can_be_downloaded')
         self.title: Optional[str] = json_data.get('title')
@@ -58,24 +61,45 @@ class Project:
             'last_conversion_date_unix': json_data.get('last_conversion_date_unix')
         }
 
+    def update_content(self, from_url: Optional[str] = None, from_document: Optional[str] = None, auto_convert: bool = False):
+        """
+        Updates the project's content from a URL or document file. Returns true if it was successful.
+        """
+        if from_url and from_document:
+            raise ValueError("Specify only one of from_url or from_document.")
+
+        data = {'auto_convert': auto_convert}
+
+        files = None
+        if from_url:
+            data['from_url'] = from_url
+        elif from_document:
+            mime_type, _ = mimetypes.guess_type(from_document, strict=False)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+            files = {'from_document': (os.path.basename(from_document), open(from_document, 'rb'), mime_type)}
+        response = _api_multipart(f"/studio/projects/{self.project_id}/content", headers=self.linkedUser.headers, data=data, filesData=files)
+
+        return response.status_code == 200
+
     def delete(self):
         """
         Deletes the project.
         """
-        response = _api_del(f"/projects/{self.project_id}", self.linkedUser.headers)
+        response = _api_del(f"/studio/projects/{self.project_id}", self.linkedUser.headers)
         self.project_id = ""
 
     def convert(self):
         """
         Begins the conversion of the project into a snapshot.
         """
-        response = _api_json(f"/projects/{self.project_id}/convert", self.linkedUser.headers, jsonData=None)
+        response = _api_json(f"/studio/projects/{self.project_id}/convert", self.linkedUser.headers, jsonData=None)
 
     def get_chapters(self) -> List[Chapter]:
         """
         Gets the project's chapters.
         """
-        response = _api_get(f"/projects/{self.project_id}/chapters", headers=self.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project_id}/chapters", headers=self.linkedUser.headers)
         response_json = response.json()
         chapters = list()
         for chapter_data in response_json["chapters"]:
@@ -86,7 +110,7 @@ class Project:
         """
         Gets a chapter by its ID.
         """
-        response = _api_get(f"/projects/{self.project_id}/chapters/{chapter_id}", headers=self.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project_id}/chapters/{chapter_id}", headers=self.linkedUser.headers)
         chapter_data = response.json()
         return Chapter(chapter_data, self)
 
@@ -97,7 +121,7 @@ class Project:
         self.update_data()
         if not self.can_be_downloaded:
             return []   #No snapshots available.
-        response = _api_get(f"/projects/{self.project_id}/snapshots", headers=self.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project_id}/snapshots", headers=self.linkedUser.headers)
         response_json = response.json()
         snapshots = list()
         for snapshot_data in response_json["snapshots"]:
@@ -123,13 +147,13 @@ class Project:
                 for pdict in pronunciation_dictionaries
             ]
         }
-        response = _api_json(f"/projects/{self.project_id}/update-pronunciation-dictionaries", headers=self.linkedUser.headers, jsonData=payload)
+        response = _api_json(f"/studio/projects/{self.project_id}/update-pronunciation-dictionaries", headers=self.linkedUser.headers, jsonData=payload)
 
     def add_chapter(self, name:str, from_url:str=None) -> Chapter:
         payload = {"name": name,}
         if from_url:
             payload["from_url"] = from_url
-        response = _api_json(f"/projects/{self.project_id}/chapters/add", headers=self.linkedUser.headers, jsonData=payload)
+        response = _api_json(f"/studio/projects/{self.project_id}/chapters/add", headers=self.linkedUser.headers, jsonData=payload)
         return Chapter(response.json()["chapter"], self)
 
 
@@ -150,7 +174,7 @@ class Chapter:
         """
         Updates the chapter's data.
         """
-        response = _api_get(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}", headers=self.project.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project.project_id}/chapters/{self.chapter_id}", headers=self.project.linkedUser.headers)
         json_data = response.json()
         self.name: str = json_data.get('name')
         self.last_conversion_date_unix: Optional[str] = json_data.get('last_conversion_date_unix')
@@ -163,14 +187,14 @@ class Chapter:
         """
         Deletes the chapter.
         """
-        response = _api_del(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}", self.project.linkedUser.headers)
+        response = _api_del(f"/studio/projects/{self.project.project_id}/chapters/{self.chapter_id}", self.project.linkedUser.headers)
         self.chapter_id = ""
 
     def convert(self):
         """
         Begins the conversion of the chapter into a snapshot.
         """
-        response = _api_json(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}/convert", self.project.linkedUser.headers, jsonData=None)
+        response = _api_json(f"/studio/projects/{self.project.project_id}/chapters/{self.chapter_id}/convert", self.project.linkedUser.headers, jsonData=None)
 
     def get_snapshots(self) -> List[ChapterSnapshot]:
         """
@@ -180,7 +204,7 @@ class Chapter:
         if not self.can_be_downloaded:  #No snapshots are available.
             return []
 
-        response = _api_get(f"/projects/{self.project.project_id}/chapters/{self.chapter_id}/snapshots", headers=self.project.linkedUser.headers)
+        response = _api_get(f"/studio/projects/{self.project.project_id}/chapters/{self.chapter_id}/snapshots", headers=self.project.linkedUser.headers)
 
         response_json = response.json()
         chapter_snapshots = list()
@@ -209,7 +233,7 @@ class ProjectSnapshot(_PlayableItem):
         self.name:str = json_data.get('name')
 
     def get_audio_bytes(self) -> bytes:
-        return self._fetch_and_cache_audio(lambda: _api_json(f"/projects/{self.project.project_id}/snapshots/{self.project_snapshot_id}/stream", self.project.linkedUser.headers, jsonData=None))
+        return self._fetch_and_cache_audio(lambda: _api_json(f"/studio/projects/{self.project.project_id}/snapshots/{self.project_snapshot_id}/stream", self.project.linkedUser.headers, jsonData=None))
 
 
 
@@ -223,6 +247,6 @@ class ChapterSnapshot(_PlayableItem):
         self.name:str = json_data.get('name')
 
     def get_audio_bytes(self) -> bytes:
-        return self._fetch_and_cache_audio(lambda: _api_json(f"/projects/{self.chapter.project.project_id}/chapters/{self.chapter.chapter_id}/snapshots/{self.chapter_snapshot_id}/stream", self.chapter.project.linkedUser.headers, jsonData=None))
+        return self._fetch_and_cache_audio(lambda: _api_json(f"/studio/projects/{self.chapter.project.project_id}/chapters/{self.chapter.chapter_id}/snapshots/{self.chapter_snapshot_id}/stream", self.chapter.project.linkedUser.headers, jsonData=None))
 
 
