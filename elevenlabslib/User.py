@@ -775,6 +775,122 @@ class User:
         response = _api_multipart("/projects/add", headers=self.headers, data=data, filesData=files)
         return Project(response.json()["project"], self)
 
+    def create_podcast(self,
+                       model_id: str,
+                       podcast_type: str,  # "conversation" or "bulletin"
+                       host_voice: Union[str, Voice],
+                       guest_voice: Optional[Union[str, Voice]] = None,  # Required only for "conversation" mode
+                       source_text: Optional[str] = None,
+                       source_url: Optional[str] = None,
+                       quality_preset: str = "standard",
+                       duration_scale: str = "default",
+                       language: Optional[str] = None,
+                       highlights: Optional[List[str]] = None,
+                       callback_url: Optional[str] = None) -> Project:
+        """
+        Creates a new podcast project with simplified parameters.
+
+        Parameters:
+            model_id (str): ID of the model to use.
+            podcast_type (str): Either 'conversation' or 'bulletin'.
+            host_voice (str|Voice): Voice for the host.
+            guest_voice (str|Voice, optional): Voice for the guest (required for 'conversation' mode).
+            source_text (str, optional): Text content for the podcast. Either this or source_url must be provided.
+            source_url (str, optional): URL to extract content from. Either this or source_text must be provided.
+            quality_preset (str, optional): Audio quality. Options: 'standard', 'high', 'highest',
+                                          'ultra', 'ultra_lossless'. Defaults to 'standard'.
+            duration_scale (str, optional): Duration of the podcast. Options: 'short', 'default', 'long'.
+                                           Defaults to 'default'.
+            language (str, optional): ISO 639-1 two-letter language code.
+            highlights (list[str], optional): Brief summary points (10-70 characters each).
+            callback_url (str, optional): URL to call when project is converted.
+
+        Returns:
+            Project: The created podcast project.
+        """
+        # Convert Voice objects to voice IDs
+        if isinstance(host_voice, Voice):
+            host_voice_id = host_voice.voiceID
+        else:
+            host_voice_id = host_voice
+
+        if guest_voice is not None:
+            if isinstance(guest_voice, Voice):
+                guest_voice_id = guest_voice.voiceID
+            else:
+                guest_voice_id = guest_voice
+        else:
+            guest_voice_id = None
+
+        # Validate basic parameters
+        if podcast_type not in ["conversation", "bulletin"]:
+            raise ValueError("podcast_type must be either 'conversation' or 'bulletin'")
+
+        if podcast_type == "conversation" and not guest_voice_id:
+            raise ValueError("guest_voice is required for conversation mode")
+
+        if not (source_text or source_url):
+            raise ValueError("Either source_text or source_url must be provided")
+
+        if source_text and source_url:
+            raise ValueError("Provide either source_text or source_url, not both")
+
+        # Validate quality_preset and duration_scale
+        valid_presets = ["standard", "high", "highest", "ultra", "ultra_lossless"]
+        if quality_preset not in valid_presets:
+            raise ValueError(f"Quality preset must be one of: {', '.join(valid_presets)}")
+
+        valid_scales = ["short", "default", "long"]
+        if duration_scale not in valid_scales:
+            raise ValueError(f"Duration scale must be one of: {', '.join(valid_scales)}")
+
+        # Construct the nested structures internally
+        if podcast_type == "conversation":
+            mode = {
+                "type": "conversation",
+                "conversation": {
+                    "host_voice_id": host_voice_id,
+                    "guest_voice_id": guest_voice_id
+                }
+            }
+        else:  # bulletin
+            mode = {
+                "type": "bulletin",
+                "bulletin": {
+                    "host_voice_id": host_voice_id
+                }
+            }
+
+        if source_text:
+            source = {"type": "text", "text": source_text}
+        else:
+            source = {"type": "url", "url": source_url}
+
+        # Prepare the data payload
+        data = {
+            'model_id': model_id,
+            'mode': mode,
+            'source': source,
+            'quality_preset': quality_preset,
+            'duration_scale': duration_scale
+        }
+
+        # Add optional parameters if provided
+        if language:
+            data['language'] = language
+
+        if highlights:
+            data['highlights'] = highlights
+
+        if callback_url:
+            data['callback_url'] = callback_url
+
+        # Make the API request
+        response = _api_json("/studio/podcasts", headers=self.headers, jsonData=data)
+
+        # Create and return a Project object from the response
+        return Project(response.json()["project"], self)
+
     def add_pronunciation_dictionary(self, name:str, description:str, dict_file:Union[str, TextIO]) -> PronunciationDictionary:
         """
         Adds a pronunciation dictionary.
