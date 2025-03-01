@@ -248,7 +248,7 @@ class GenerationOptions:
     If any option besides model_id and latencyOptimizationLevel is omitted, the stored value associated with the voice is used.
 
     Parameters:
-        model (Model|str, optional): The TTS model (or its ID) to use for the generation. Defaults to monolingual english v1.
+        model (Model|str, optional): The TTS model (or its ID) to use for the generation. Defaults to multilingual v2.
         latencyOptimizationLevel (int, optional): The level of latency optimization (0-4) to apply. Defaults to 0.
         stability (float, optional): A float between 0 and 1 representing the stability of the generated audio. If omitted, the current stability setting is used.
         similarity_boost (float, optional): A float between 0 and 1 representing the similarity boost of the generated audio. If omitted, the current similarity boost setting is used.

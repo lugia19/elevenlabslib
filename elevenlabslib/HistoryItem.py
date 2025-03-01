@@ -138,8 +138,10 @@ class HistoryItem(_PlayableItem):
         settings_string = f"s{round(genSettings.stability*100)}_sb{round(genSettings.similarity_boost*100)}"
         if "v2" in genSettings.model_id:
             settings_string += f"_se{round(genSettings.style*100)}{'_b' if genSettings.use_speaker_boost else ''}"
-
-        model_string = ModelShorthands[genSettings.model_id]
+        try:
+            model_string = ModelShorthands[genSettings.model_id]
+        except AttributeError:
+            model_string = ""
         filename = f"ElevenLabs_{date_string}T{time_string}_{self.voiceName}_{category_string}_{settings_string}{'_'+model_string if model_string else ''}"
 
         #This is just here to be implemented in the future. Right now, both PCM and mp3 audio get a .mp3 extension on the API.
