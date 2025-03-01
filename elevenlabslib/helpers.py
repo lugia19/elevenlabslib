@@ -731,6 +731,8 @@ def _api_tts_with_concurrency(requestFunction:callable, generationID:str, genera
         response = requestFunction()
         response.raise_for_status() #Just in case the callable isn't a function that already does this.
     except requests.exceptions.RequestException as e:
+        if e.response is None:
+            raise e
         response_json = e.response.json()
         response_handled = False
 
