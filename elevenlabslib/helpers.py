@@ -257,6 +257,7 @@ class GenerationOptions:
         output_format (str, optional): Output format for the audio. mp3_highest and pcm_highest will automatically use the highest quality of that format you have available.
         pronunciation_dictionaries (List[PronunciationDictionary], optional): The pronunciation dictionaries to apply to this request (max 3).
         seed (int, optional): The seed. to use for this generation (Determinism is not guaranteed)
+        speed (float, optional): The speed setting. Between 0.7 and 1.2. Defaults to 1.
         language_code (str, optional): An ISO 639-1 code, used to enforce a language for the model. Currently turbo v2.5 only.
 
     Warning:
@@ -271,6 +272,7 @@ class GenerationOptions:
     """
     model_id: Optional[str] = dataclasses.field(default=None, init=True, repr=False)
     latencyOptimizationLevel: int = 0
+    speed: Optional[float] = 1
     stability: Optional[float] = None
     similarity_boost: Optional[float] = None
     style: Optional[float] = None
@@ -297,7 +299,8 @@ class GenerationOptions:
 
         if (self.latencyOptimizationLevel < 0 or self.latencyOptimizationLevel > 4) and self.latencyOptimizationLevel != -99:
             raise ValueError("Please provide a value between 0 and 4 for latencyOptimizationLevel")
-
+        if self.speed < 0.7 or self.speed > 1.2:
+            raise ValueError("Please provide a value between 0.7 and 1.2 for speed.")
         validOutputFormats = ["mp3_44100_64", "mp3_44100_96", "mp3_44100_128","mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "mp3_highest","pcm_highest", "ulaw_8000"]
 
         if self.output_format not in validOutputFormats:
@@ -308,7 +311,8 @@ class GenerationOptions:
             "similarity_boost":self.similarity_boost,
             "stability":self.stability,
             "style":self.style,
-            "use_speaker_boost":self.use_speaker_boost
+            "use_speaker_boost":self.use_speaker_boost,
+            "speed": self.speed
         }
 
 @dataclasses.dataclass
