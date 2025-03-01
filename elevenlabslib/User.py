@@ -403,6 +403,8 @@ class User:
             Returns:
                 (str, bytes): A tuple containing the new, temporary voiceID and the bytes of the generated audio.
         """
+        warn("This method is deprecated. Please use generate_voice instead.", DeprecationWarning)
+
         if not (0.3 <= accent_strength <= 2):
             raise ValueError("accent_strength must be within 0.3 and 2!")
 
@@ -429,6 +431,7 @@ class User:
             Returns:
                 DesignedVoice: The newly created voice
         """
+        warn("This method is deprecated. Please use save_generated_voice instead.", DeprecationWarning)
         if temporaryVoiceID is tuple:
             temporaryVoiceID = temporaryVoiceID[0]
         payload = {
@@ -439,6 +442,97 @@ class User:
         response = _api_json("/voice-generation/create-voice", headers=self._headers, jsonData=payload)
 
         return self.get_voice_by_ID(response.json()["voice_id"])
+
+    def generate_voice(self, voice_description: str, text: str = None, auto_generate_text: bool = False,
+                       output_format: str = "mp3_44100_192") -> list[tuple[str, bytes, float]]:
+        """
+        Calls the updated API endpoint that generates voice previews based on the given description.
+
+        Args:
+            voice_description (str): Description of the voice to generate. Must be between 20-1000 characters.
+            text (str, optional): Text to generate audio for. Must be between 100-1000 characters.
+                Required unless auto_generate_text is True.
+            auto_generate_text (bool, optional): Whether to automatically generate suitable text.
+                Defaults to False.
+            output_format (str, optional): Output format for the generated audio.
+                Defaults to "mp3_44100_192".
+
+        Returns:
+            list[tuple[str, bytes, float]]: A list of tuples, each containing:
+                - generated_voice_id (str): Temporary ID for the generated voice
+                - audio_bytes (bytes): Audio data for the preview
+                - duration_secs (float): Duration of the audio in seconds
+
+        Raises:
+            ValueError: If voice_description is not between 20-1000 characters or
+                       if text is not between 100-1000 characters when required.
+        """
+        # Validate input parameters
+        if not (20 <= len(voice_description) <= 1000):
+            raise ValueError("voice_description must be between 20 and 1000 characters")
+
+        if not auto_generate_text and (text is None or not (100 <= len(text) <= 1000)):
+            raise ValueError("text must be between 100 and 1000 characters when auto_generate_text is False")
+
+        payload = {
+            "voice_description": voice_description,
+            "auto_generate_text": auto_generate_text
+        }
+
+        if text is not None:
+            payload["text"] = text
+
+        params = {"output_format": output_format} if output_format else {}
+
+        response = _api_json("/text-to-voice/create-previews", headers=self._headers,
+                             jsonData=payload, params=params)
+
+        result = response.json()
+        previews = []
+
+        for preview in result["previews"]:
+            audio_data = base64.b64decode(preview["audio_base_64"])
+            previews.append((
+                preview["generated_voice_id"],
+                audio_data,
+                preview.get("duration_secs", 0)
+            ))
+
+        return previews
+
+    def save_generated_voice(self, generated_voice_id: str, voice_name: str, voice_description: str,
+                             labels: dict[str, str] = None) -> EditableVoice:
+        """
+        Saves a voice generated via generate_voice to your account.
+
+        Args:
+            generated_voice_id (str): The temporary voice ID returned by generate_voice.
+            voice_name (str): The name you would like to give to the new voice.
+            voice_description (str): The description for the voice. Must be between 20-1000 characters.
+            labels (dict[str, str], optional): Metadata to add to the created voice. Defaults to None.
+
+        Returns:
+            DesignedVoice: The newly created voice
+
+        Raises:
+            ValueError: If voice_description is not between 20-1000 characters.
+        """
+        if not (20 <= len(voice_description) <= 1000):
+            raise ValueError("voice_description must be between 20 and 1000 characters")
+
+        payload = {
+            "voice_name": voice_name,
+            "voice_description": voice_description,
+            "generated_voice_id": generated_voice_id,
+        }
+
+        if labels:
+            payload["labels"] = labels
+
+        response = _api_json("/text-to-voice/create-voice-from-preview", headers=self._headers, jsonData=payload)
+        response_data = response.json()
+
+        return self.get_voice_by_ID(response_data["voice_id"])
 
     def clone_voice(self, name:str, samples:Union[list[str],dict[str, bytes]], description:str = "", remove_background_noise:bool = False, labels:dict[str, str]=None):
         """
