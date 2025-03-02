@@ -902,7 +902,7 @@ class User:
         """
         Transcribes speech from an audio file.
 
-        Arguments:
+        Parameters:
             audio: Can be one of:
                 - str: Path to the audio file
                 - bytes: Raw audio data
