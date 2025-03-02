@@ -891,6 +891,75 @@ class User:
         # Create and return a Project object from the response
         return Project(response.json()["project"], self)
 
+    def create_transcript(self,
+                          audio: Union[str, bytes, BinaryIO],
+                          model_id: str = "scribe_v1",
+                          language_code: Optional[str] = None,
+                          tag_audio_events: bool = True,
+                          num_speakers: Optional[int] = None,
+                          timestamps_granularity: str = "word",
+                          diarize: bool = False) -> dict:
+        """
+        Transcribes speech from an audio file.
+
+        Arguments:
+            audio: Can be one of:
+                - str: Path to the audio file
+                - bytes: Raw audio data
+                - BinaryIO: File-like object containing audio data
+            model_id (str): The ID of the model to use for transcription. Currently only 'scribe_v1' is available.
+            language_code (str, optional): ISO-639-1 or ISO-639-3 language code for the audio file.
+            tag_audio_events (bool, optional): Whether to tag audio events like (laughter), (footsteps), etc. Defaults to True.
+            num_speakers (int, optional): Maximum number of speakers (1-32). Defaults to model's maximum.
+            timestamps_granularity (str, optional): Granularity of timestamps: 'none', 'word', or 'character'. Defaults to 'word'.
+            diarize (bool, optional): Whether to annotate which speaker is talking. Limits audio to 8 minutes. Defaults to False.
+
+        Returns:
+            dict: The transcription results.
+        """
+        if num_speakers and (num_speakers < 1 or num_speakers > 32):
+            raise ValueError("num_speakers must be between 1 and 32")
+
+        valid_granularities = ["none", "word", "character"]
+        if timestamps_granularity not in valid_granularities:
+            raise ValueError(f"timestamps_granularity must be one of: {', '.join(valid_granularities)}")
+
+        data = {
+            'model_id': model_id,
+            'tag_audio_events': tag_audio_events,
+            'timestamps_granularity': timestamps_granularity,
+            'diarize': diarize
+        }
+
+        if language_code:
+            data['language_code'] = language_code
+        if num_speakers:
+            data['num_speakers'] = num_speakers
+
+        # Handle different audio input types
+        files = None
+        if isinstance(audio, str):
+            # Filepath
+            mime_type, _ = mimetypes.guess_type(audio, strict=False)
+            if mime_type is None:
+                mime_type = 'audio/mpeg'  # Default to audio/mpeg if can't determine
+            files = {'file': (os.path.basename(audio), open(audio, 'rb'), mime_type)}
+        elif isinstance(audio, bytes):
+            files = {'file': ('audio.mp3', audio, 'audio/mpeg')}
+        else:
+            # Assume BinaryIO
+            try:
+                # Try to get filename if available
+                filename = getattr(audio, 'name', 'audio.mp3')
+                if isinstance(filename, int):
+                    filename = 'audio.mp3'
+                files = {'file': (os.path.basename(filename), audio, 'audio/mpeg')}
+            except (AttributeError, TypeError):
+                raise ValueError("Unsupported audio input type. Must be filepath string, bytes, or file-like object.")
+
+        response = _api_multipart("/speech-to-text", headers=self.headers, data=data, filesData=files)
+        return response.json()
+
     def add_pronunciation_dictionary(self, name:str, description:str, dict_file:Union[str, TextIO]) -> PronunciationDictionary:
         """
         Adds a pronunciation dictionary.
