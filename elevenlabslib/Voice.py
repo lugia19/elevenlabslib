@@ -148,7 +148,7 @@ class Voice:
 
         return self._settings
 
-    def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, use_speaker_boost:bool=None):
+    def edit_settings(self, stability:float=None, similarity_boost:float=None, style:float=None, use_speaker_boost:bool=None, speed:float=None):
         """
         Note:
             If either argument is omitted, the current values will be used instead.
@@ -160,7 +160,7 @@ class Voice:
             similarity_boost (float, optional): The similarity boost to set.
             style (float, optional): The style to set (v2 models only).
             use_speaker_boost (bool, optional): Whether to enable the speaker boost (v2 models only).
-
+            speed (float, optional): The speed to set (Between 0.8 and 1.2).
         Raises:
             ValueError: If the provided values don't fit the correct ranges.
         """
@@ -171,11 +171,14 @@ class Voice:
             if similarity_boost is None: stability = oldSettings["similarity_boost"]
             if style is None: style = oldSettings["style"]
             if use_speaker_boost is None: style = oldSettings["use_speaker_boost"]
+            if speed is None: speed = oldSettings["speed"]
 
         for arg in (stability, similarity_boost, style):
             if not (0 <= arg <= 1):
                 raise ValueError("Please provide a value between 0 and 1.")
-        payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "use_speaker_boost":use_speaker_boost}
+        if not (0.8 <= speed <= 1.2):
+            raise ValueError("Please provide a speed between 0.8 and 1.2.")
+        payload = {"stability": stability, "similarity_boost": similarity_boost, "style":style, "use_speaker_boost":use_speaker_boost, "speed": speed}
         _api_json("/voices/" + self.voiceID + "/settings/edit", self._linkedUser.headers, jsonData=payload)
         self._settings = payload
 
