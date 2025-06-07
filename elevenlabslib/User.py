@@ -49,20 +49,6 @@ class User:
         self._headers["xi-api-key"] = self.xi_api_key
         self.generation_queue = _PeekQueue()
         self._subscriptionTier = None           #Used to cache the result for mp3/pcm_highest
-        try:
-            self.update_audio_quality()
-        except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
-            try:
-                responseJson = e.response.json()
-                responseStatus = responseJson["detail"]["status"]
-                # If those keys aren't present it'll error out and raise e anyway.
-            except:
-                raise e
-
-            if responseStatus == "invalid_api_key":
-                raise ValueError("Invalid API Key!")
-            else:
-                raise e
 
     @property
     def headers(self) -> dict:
@@ -76,8 +62,6 @@ class User:
     def xi_api_key(self) -> str:
         return self._xi_api_key
 
-
-    #Userdata-centric functions
     def get_user_data(self) -> dict:
         """
         Returns:

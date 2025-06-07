@@ -862,8 +862,31 @@ def io_hash_from_audio(source_audio:Union[bytes, BinaryIO]) -> (BinaryIO, str):
 
     return audio_io, audio_hash
 
+def check_api_key(api_key: Optional[str]) -> bool:
+    """
+    Checks if the provided API key is valid by making a request to the ElevenLabs API.
 
+    Parameters:
+        api_key (str): The API key to check.
 
+    Returns:
+        bool: True if the API key is valid, False otherwise.
+    """
+    try:
+        response = requests.get("https://api.elevenlabs.io/v1/user", headers={"xi-api-key": api_key})
+        response.raise_for_status()
+        return True
+    except (requests.exceptions.RequestException, requests.exceptions.HTTPError) as e:
+        try:
+            responseJson = e.response.json()
+            responseStatus = responseJson["detail"]["status"]
+            # If those keys aren't present (eg, you hit a rate limit) it'll error out and raise e anyway.
+            if responseStatus == "invalid_api_key":
+                return False
+        except:
+            raise e
+    # This should never run? Just return False to be safe.
+    return False
 
 
 
