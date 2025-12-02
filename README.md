@@ -6,7 +6,7 @@
 
 Python wrapper for the full elevenlabs API.
 
-### NOTE: There's now an official wrapper, but this project will continue to be maintained.
+### This project is now deprecated. The API simply changes too quickly and has become too broad for me to keep up with.
 
 The main reason is the different approach to playback. By doing playback purely within python instead of piping to an external process, there are a couple of important extra things that can be done, such as:
 - Playback on a specific output device
